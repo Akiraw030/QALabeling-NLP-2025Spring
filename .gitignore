@@ -1,1 +1,4 @@
+.vscode/
 data/
+model/
+deberta-v3-base-tokenizer/
