@@ -14,26 +14,29 @@ from tqdm import tqdm
 from data import DebertaDataset, TARGET_COLS
 from model import QuestModel
 
+POS_WEIGHT_VALUES = [
+    0.9, 1, 1.5, 0.8, 0.8, 0.8, 0.96, 1.1, 1.1, 3, 
+    1, 1.1, 2, 3, 3, 2, 1, 2, 1, 2, 
+    0.9, 0.75, 0.9, 0.75, 0.75, 0.7, 1, 2.5, 1, 0.75
+]
+
 # --- Configuration ---
 class CFG:
     model_name = 'microsoft/deberta-v3-base'
     
-    # STRATEGY SWITCH: Choose 'mean', 'arch1', or 'arch2'
-    # 'arch1' is the top image (Multi-feature concatenation)
-    # 'arch2' is the bottom image (Multi-layer pooling)
-    pooling_strategy = 'arch1' 
+    pooling_strategy = 'arch1_6groups' 
     
     max_len = 512
-    batch_size = 4        # Keep small for 8GB VRAM
-    accum_steps = 4       # Effective batch size = 16
-    epochs = 2            # Complex heads might need 1 more epoch to converge
+    batch_size = 4        
+    accum_steps = 4       
+    epochs = 2            # 建議稍微增加 Epochs 讓模型適應新的 Loss Landscape
     lr = 2e-5             # Backbone learning rate
-    head_lr = 2e-4        # (Optional) Higher LR for the new complex head if needed
+    head_lr = 1e-4        # Head learning rate (usually 5x-10x larger than backbone)
     weight_decay = 0.01
-    max_grad_norm = 1.0   # Important for stability with complex heads
+    max_grad_norm = 1.0   
     seed = 42
     n_fold = 5
-    num_workers = 16
+    num_workers = 2       # 若是在 Windows 本地跑，設 0 或 2 比較穩；Linux 可設高
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
     num_targets = len(TARGET_COLS)
@@ -47,38 +50,51 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 
-# --- Helper: Optimized Rounder (Sakami's Trick) ---
+# --- Helper: Optimized Rounder ---
 class OptimizedRounder:
     def __init__(self):
-        self.coef_ = 0
+        self.coef_ = [0.05, 0.95] # 預設初始值
 
     def _loss_func(self, coef, X, y):
         X_p = np.copy(X)
         for i, pred in enumerate(X_p):
             if pred < coef[0]: X_p[i] = coef[0]
             elif pred > coef[1]: X_p[i] = coef[1]
-        ll = spearmanr(y, X_p).correlation
-        return -ll
+        
+        try:
+            ll = spearmanr(y, X_p).correlation
+            if np.isnan(ll): return 0
+            return -ll
+        except:
+            return 0
 
     def fit(self, X, y):
         from scipy.optimize import minimize
-        x0 = [0.0, 1.0]
-        # Using Nelder-Mead as it's robust for non-differentiable problems
+        x0 = [0.05, 0.95]
         opt = minimize(self._loss_func, x0, args=(X, y), method='nelder-mead', tol=1e-6)
         self.coef_ = opt.x
 
     def predict(self, X, coef):
         X_p = np.copy(X)
-        for i, pred in enumerate(X_p):
-            if pred < coef[0]: X_p[i] = coef[0]
-            elif pred > coef[1]: X_p[i] = coef[1]
+        # 1. 處理 NaN
+        X_p = np.nan_to_num(X_p, nan=0.5)
+        
+        low, high = coef[0], coef[1]
+        # 2. 截斷
+        X_p = np.clip(X_p, low, high)
+        
+        # 3. 防止常數輸出 (微小擾動)
+        if np.unique(X_p).size == 1:
+            eps = 1e-6
+            max_idx = np.argmax(X)
+            X_p[max_idx] += eps
+            
         return X_p
 
 # --- Training Helper Functions ---
 def get_score(y_true, y_pred):
     scores = []
     for i in range(y_true.shape[1]):
-        # Handle potential constant values causing nan in spearmanr
         try:
             score = spearmanr(y_true[:, i], y_pred[:, i]).correlation
             if np.isnan(score):
@@ -94,28 +110,28 @@ def train_fn(train_loader, model, optimizer, scheduler, epoch, scaler):
     losses = []
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1} Train")
     
+    pos_weight = torch.tensor(POS_WEIGHT_VALUES, dtype=torch.float32).to(CFG.device)
+    
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    
     for step, batch in enumerate(pbar):
-        # Move inputs to device
         input_ids = batch['input_ids'].to(CFG.device)
         attention_mask = batch['attention_mask'].to(CFG.device)
         labels = batch['labels'].to(CFG.device)
         
-        # CRITICAL: Extract token_type_ids for Arch1 (Question vs Answer distinction)
         token_type_ids = batch.get('token_type_ids')
         if token_type_ids is not None:
             token_type_ids = token_type_ids.to(CFG.device)
         
-        # Mixed Precision Training
         with autocast():
-            # Pass token_type_ids to the model
             y_preds = model(input_ids, attention_mask, token_type_ids)
-            loss = nn.BCEWithLogitsLoss()(y_preds, labels)
+            
+            loss = criterion(y_preds, labels)
             
         loss = loss / CFG.accum_steps
         scaler.scale(loss).backward()
         
         if (step + 1) % CFG.accum_steps == 0:
-            # Gradient Clipping (Essential for complex heads)
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
             
@@ -148,7 +164,6 @@ def valid_fn(valid_loader, model):
             with autocast():
                 y_preds = model(input_ids, attention_mask, token_type_ids)
             
-            # Convert logits to probability [0, 1]
             preds.append(y_preds.sigmoid().cpu().numpy())
             valid_labels.append(labels.cpu().numpy())
             
@@ -157,6 +172,10 @@ def valid_fn(valid_loader, model):
 if __name__ == '__main__':
     seed_everything(CFG.seed)    
     print(f"Using Strategy: {CFG.pooling_strategy}")
+    
+    # 自動建立儲存目錄
+    if not os.path.exists('./model'):
+        os.makedirs('./model')
     
     if os.path.exists('./data/train.csv'):
         train = pd.read_csv('./data/train.csv')
@@ -188,7 +207,13 @@ if __name__ == '__main__':
         )
         model.to(CFG.device)
         
-        optimizer = AdamW(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
+        # 分組優化器參數：Backbone 用小 LR，Head 用大 LR
+        optimizer_parameters = [
+            {'params': [p for n, p in model.backbone.named_parameters()], 'lr': CFG.lr},
+            {'params': [p for n, p in model.named_parameters() if "backbone" not in n], 'lr': CFG.head_lr}
+        ]
+        
+        optimizer = AdamW(optimizer_parameters, weight_decay=CFG.weight_decay)
         
         num_train_steps = int(len(train_df) / CFG.batch_size / CFG.accum_steps * CFG.epochs)
         scheduler = get_linear_schedule_with_warmup(
@@ -216,7 +241,6 @@ if __name__ == '__main__':
             opt_score = get_score(valid_labels, opt_preds)
             print(f"Epoch {epoch+1} - Optimized Score: {opt_score:.4f} (+{opt_score - score:.4f})")
             
-            # Save Best Model based on OPTIMIZED score
             if opt_score > best_score:
                 best_score = opt_score
                 torch.save(model.state_dict(), f"./model/deberta_v3_fold{fold}_best.pth")

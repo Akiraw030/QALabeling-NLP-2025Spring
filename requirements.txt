@@ -9,3 +9,6 @@ sentencepiece
 protobuf
 torch
 torchvision
+
+seaborn
+matplotlib
