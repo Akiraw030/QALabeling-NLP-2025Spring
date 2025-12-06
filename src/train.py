@@ -8,7 +8,7 @@ from torch.optim import AdamW
 from torch.cuda.amp import autocast, GradScaler
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 from scipy.stats import spearmanr
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import GroupKFold, train_test_split
 from tqdm import tqdm
 
 from data import DebertaDataset, TARGET_COLS
@@ -26,17 +26,23 @@ class CFG:
     
     pooling_strategy = 'arch1_6groups' 
     
+    # 【關鍵開關】
+    # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
+    # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
+    use_kfold = False
+    
     max_len = 512
     batch_size = 4        
     accum_steps = 4       
-    epochs = 2            # 建議稍微增加 Epochs 讓模型適應新的 Loss Landscape
-    lr = 2e-5             # Backbone learning rate
-    head_lr = 1e-4        # Head learning rate (usually 5x-10x larger than backbone)
+    epochs = 5            
+    lr = 2e-5             
+    head_lr = 1e-4        
     weight_decay = 0.01
     max_grad_norm = 1.0   
     seed = 42
-    n_fold = 5
-    num_workers = 2       # 若是在 Windows 本地跑，設 0 或 2 比較穩；Linux 可設高
+    n_fold = 5            # 只在 use_kfold=True 時生效
+    val_size = 0.2        # 只在 use_kfold=False 時生效
+    num_workers = 2       
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
     num_targets = len(TARGET_COLS)
@@ -76,14 +82,11 @@ class OptimizedRounder:
 
     def predict(self, X, coef):
         X_p = np.copy(X)
-        # 1. 處理 NaN
         X_p = np.nan_to_num(X_p, nan=0.5)
         
         low, high = coef[0], coef[1]
-        # 2. 截斷
         X_p = np.clip(X_p, low, high)
         
-        # 3. 防止常數輸出 (微小擾動)
         if np.unique(X_p).size == 1:
             eps = 1e-6
             max_idx = np.argmax(X)
@@ -111,7 +114,6 @@ def train_fn(train_loader, model, optimizer, scheduler, epoch, scaler):
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1} Train")
     
     pos_weight = torch.tensor(POS_WEIGHT_VALUES, dtype=torch.float32).to(CFG.device)
-    
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     
     for step, batch in enumerate(pbar):
@@ -125,7 +127,6 @@ def train_fn(train_loader, model, optimizer, scheduler, epoch, scaler):
         
         with autocast():
             y_preds = model(input_ids, attention_mask, token_type_ids)
-            
             loss = criterion(y_preds, labels)
             
         loss = loss / CFG.accum_steps
@@ -172,21 +173,43 @@ def valid_fn(valid_loader, model):
 if __name__ == '__main__':
     seed_everything(CFG.seed)    
     print(f"Using Strategy: {CFG.pooling_strategy}")
+    print(f"Running Mode: {'K-Fold Cross Validation' if CFG.use_kfold else 'Single Train/Valid Split'}")
     
-    # 自動建立儲存目錄
     if not os.path.exists('./model'):
         os.makedirs('./model')
     
     if os.path.exists('./data/train.csv'):
         train = pd.read_csv('./data/train.csv')
     else:
-        print("Error: ./data/train.csv not found.")
-        exit()
+        # Fallback check
+        if os.path.exists('train.csv'):
+            train = pd.read_csv('train.csv')
+        else:
+            print("Error: train.csv not found.")
+            exit()
 
     tokenizer = AutoTokenizer.from_pretrained(CFG.model_name)
-    gkf = GroupKFold(n_splits=CFG.n_fold)
     
-    for fold, (train_idx, val_idx) in enumerate(gkf.split(train, train[CFG.target_cols], train['question_body'])):
+    # ------------------------------------------------------------------
+    # 數據切分邏輯 (Splitting Logic)
+    # ------------------------------------------------------------------
+    splits = []
+    
+    if CFG.use_kfold:
+        # K-Fold 模式：產生 5 組 (train_idx, val_idx)
+        gkf = GroupKFold(n_splits=CFG.n_fold)
+        splits = list(gkf.split(train, train[CFG.target_cols], train['question_body']))
+    else:
+        # Single Run 模式：產生 1 組 (train_idx, val_idx)
+        # 為了相容下面的迴圈，我們手動取得索引並包成 list
+        all_indices = np.arange(len(train))
+        train_idx, val_idx = train_test_split(all_indices, test_size=CFG.val_size, random_state=CFG.seed)
+        splits = [(train_idx, val_idx)] # 包成列表，讓迴圈跑一次
+
+    # ------------------------------------------------------------------
+    # 訓練迴圈 (相容 K-Fold 與 Single Run)
+    # ------------------------------------------------------------------
+    for fold, (train_idx, val_idx) in enumerate(splits):
         print(f"\n{'='*30} Fold {fold} {'='*30}")
         
         train_df = train.iloc[train_idx]
@@ -207,7 +230,7 @@ if __name__ == '__main__':
         )
         model.to(CFG.device)
         
-        # 分組優化器參數：Backbone 用小 LR，Head 用大 LR
+        # 分層學習率 (Layer-wise Learning Rate)
         optimizer_parameters = [
             {'params': [p for n, p in model.backbone.named_parameters()], 'lr': CFG.lr},
             {'params': [p for n, p in model.named_parameters() if "backbone" not in n], 'lr': CFG.head_lr}
@@ -243,8 +266,14 @@ if __name__ == '__main__':
             
             if opt_score > best_score:
                 best_score = opt_score
-                torch.save(model.state_dict(), f"./model/deberta_v3_fold{fold}_best.pth")
-                print(f"--> Saved Best Model (Strategy: {CFG.pooling_strategy}): {best_score:.4f}")
+                
+                if CFG.use_kfold:
+                    save_name = f"deberta_v3_fold{fold}_best.pth"
+                else:
+                    save_name = f"deberta_v3_single_run_best.pth"
+                    
+                torch.save(model.state_dict(), f"./model/{save_name}")
+                print(f"--> Saved Best Model: {best_score:.4f} ({save_name})")
         
         del model, optimizer, scheduler, scaler
         torch.cuda.empty_cache()
