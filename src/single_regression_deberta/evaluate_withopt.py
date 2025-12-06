@@ -1,0 +1,364 @@
+import os
+import sys
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoTokenizer, AutoModel, AutoConfig
+from tqdm.auto import tqdm
+from scipy.stats import spearmanr, rankdata
+import html
+import copy
+
+# ------------------- 配置 (Configuration) -------------------
+class CFG:
+    # 模型權重資料夾 (請確保這裡放的是 Regression 版本的 .pth)
+    model_dir = "./model" 
+    # 訓練資料路徑
+    data_path = "./data/train.csv"
+    
+    base_model = "microsoft/deberta-v3-base" 
+    pooling_strategy = 'arch1_6groups' 
+    max_len = 512
+    batch_size = 16
+    num_workers = 4
+    seed = 42
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# 目標欄位
+TARGET_COLS = [
+    'question_asker_intent_understanding', 'question_body_critical', 'question_conversational',
+    'question_expect_short_answer', 'question_fact_seeking', 'question_has_commonly_accepted_answer',
+    'question_interestingness_others', 'question_interestingness_self', 'question_multi_intent',
+    'question_not_really_a_question', 'question_opinion_seeking', 'question_type_choice',
+    'question_type_compare', 'question_type_consequence', 'question_type_definition',
+    'question_type_entity', 'question_type_instructions', 'question_type_procedure',
+    'question_type_reason_explanation', 'question_type_spelling', 'question_well_written',
+    'answer_helpful', 'answer_level_of_information', 'answer_plausible', 'answer_relevance',
+    'answer_satisfaction', 'answer_type_instructions', 'answer_type_procedure',
+    'answer_type_reason_explanation', 'answer_well_written'
+]
+
+# ------------------- 資料處理 -------------------
+def modern_preprocess(text):
+    if pd.isna(text): return ""
+    text = str(text)
+    text = html.unescape(text)
+    text = " ".join(text.split())
+    return text
+
+class QuestDataset(Dataset):
+    def __init__(self, df, tokenizer, max_len=512):
+        self.df = df
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+        
+        self.questions = [
+            modern_preprocess(t) + " " + modern_preprocess(b) 
+            for t, b in zip(df['question_title'].values, df['question_body'].values)
+        ]
+        self.answers = [modern_preprocess(a) for a in df['answer'].values]
+        
+    def __len__(self):
+        return len(self.df)
+    
+    def __getitem__(self, idx):
+        question = self.questions[idx]
+        answer = self.answers[idx]
+        
+        inputs = self.tokenizer(
+            question,
+            answer,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            padding='max_length',
+            truncation=True,
+            return_tensors=None
+        )
+        
+        item = {
+            'input_ids': torch.tensor(inputs['input_ids'], dtype=torch.long),
+            'attention_mask': torch.tensor(inputs['attention_mask'], dtype=torch.long)
+        }
+        
+        if 'token_type_ids' in inputs:
+            item['token_type_ids'] = torch.tensor(inputs['token_type_ids'], dtype=torch.long)
+            
+        return item
+
+# ------------------- 模型定義 -------------------
+class QuestModel(nn.Module):
+    def __init__(self, model_name, num_targets, pooling_strategy='arch1_6groups', dropout_rate=0.1):
+        super().__init__()
+        self.pooling_strategy = pooling_strategy
+        self.config = AutoConfig.from_pretrained(model_name)
+        self.backbone = AutoModel.from_pretrained(model_name, config=self.config)
+        hidden_size = self.config.hidden_size
+        
+        self.idx_g1 = [3, 4, 5, 16, 17]          
+        self.idx_g2 = [0, 1, 6, 7, 20]           
+        self.idx_g3 = [2, 10]                    
+        self.idx_g4 = [8, 9, 11, 12, 13, 14, 15, 18, 19] 
+        self.idx_g5 = [26, 27]                   
+        self.idx_g6 = [21, 22, 23, 24, 25, 28, 29] 
+        
+        if self.pooling_strategy == 'arch1_6groups':
+            self.head_g1 = self._make_head(hidden_size * 3, len(self.idx_g1), dropout_rate)
+            self.head_g2 = self._make_head(hidden_size * 3, len(self.idx_g2), dropout_rate)
+            self.head_g3 = self._make_head(hidden_size * 3, len(self.idx_g3), dropout_rate)
+            self.head_g4 = self._make_head(hidden_size * 3, len(self.idx_g4), dropout_rate)
+            self.head_g5 = self._make_head(hidden_size * 3, len(self.idx_g5), dropout_rate)
+            self.head_g6 = self._make_head(hidden_size * 3, len(self.idx_g6), dropout_rate)
+
+    def _make_head(self, input_dim, output_dim, dropout_rate):
+        return nn.Sequential(
+            nn.Linear(input_dim, self.config.hidden_size),
+            nn.Tanh(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(self.config.hidden_size, output_dim)
+        )
+
+    def _masked_mean_pooling(self, hidden_state, attention_mask):
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_state.size()).float()
+        sum_embeddings = torch.sum(hidden_state * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        return sum_embeddings / sum_mask
+
+    def _get_pooling_features(self, last_hidden_state, attention_mask, token_type_ids):
+        cls_token = last_hidden_state[:, 0, :]
+        global_avg = self._masked_mean_pooling(last_hidden_state, attention_mask)
+        
+        if token_type_ids is None:
+            q_avg = global_avg; a_avg = global_avg
+        else:
+            q_mask = attention_mask * (1 - token_type_ids)
+            q_avg = self._masked_mean_pooling(last_hidden_state, q_mask)
+            a_mask = attention_mask * token_type_ids
+            a_avg = self._masked_mean_pooling(last_hidden_state, a_mask)
+            
+        return cls_token, global_avg, q_avg, a_avg
+
+    def forward(self, input_ids, attention_mask, token_type_ids=None):
+        outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+        last_hidden_state = outputs.last_hidden_state
+        
+        if self.pooling_strategy == 'arch1_6groups':
+            cls, glob, q, a = self._get_pooling_features(last_hidden_state, attention_mask, token_type_ids)
+            
+            feat_pure_q = torch.cat([cls, glob, q], dim=1)
+            feat_pure_a = torch.cat([cls, glob, a], dim=1)
+            
+            out_g1 = self.head_g1(feat_pure_q)
+            out_g2 = self.head_g2(feat_pure_q)
+            out_g3 = self.head_g3(feat_pure_q)
+            out_g4 = self.head_g4(feat_pure_q)
+            out_g5 = self.head_g5(feat_pure_a)
+            out_g6 = self.head_g6(feat_pure_a)
+            
+            batch_size = input_ids.size(0)
+            output = torch.zeros(batch_size, 30, dtype=out_g1.dtype, device=input_ids.device)
+            
+            output[:, self.idx_g1] = out_g1
+            output[:, self.idx_g2] = out_g2
+            output[:, self.idx_g3] = out_g3
+            output[:, self.idx_g4] = out_g4
+            output[:, self.idx_g5] = out_g5
+            output[:, self.idx_g6] = out_g6
+            
+            return output
+        return None
+
+# =================================================================================
+# Post-Processing Strategies
+# =================================================================================
+
+# 1. OptimizedRounder (3rd Place)
+class OptimizedRounder:
+    def __init__(self):
+        self.coef_ = [0.05, 0.95]
+
+    def _spearman_loss(self, coef, X, y):
+        X_p = np.copy(X)
+        X_p[X_p < coef[0]] = coef[0]
+        X_p[X_p > coef[1]] = coef[1]
+        if np.unique(X_p).size == 1:
+            return 1.0 
+        return -spearmanr(y, X_p).correlation
+
+    def fit(self, X, y):
+        from scipy.optimize import minimize
+        x0 = [0.05, 0.95]
+        opt = minimize(self._spearman_loss, x0, args=(X, y), method='Nelder-Mead', tol=1e-6)
+        self.coef_ = [min(opt.x), max(opt.x)]
+
+    def predict(self, X, coef):
+        X = np.nan_to_num(X, nan=0.5)
+        X_p = np.copy(X)
+        low, high = coef[0], coef[1]
+        X_p = np.clip(X_p, low, high)
+        if np.unique(X_p).size == 1:
+            eps = 1e-6
+            max_idx = np.argmax(X)
+            X_p[max_idx] += eps
+        return X_p
+
+# 2. Voters Rounder (Fallback to Original)
+# 【修正】使用您指定的「回退到原始值」策略
+class VotersRounder:
+    def __init__(self, train_vals):
+        # 過濾掉可能的 NaN，確保網格乾淨
+        clean_vals = train_vals[~np.isnan(train_vals)]
+        self.unique_vals = np.sort(np.unique(clean_vals))
+    
+    def predict(self, X):
+        # 1. 清理輸入 NaN
+        X_clean = np.nan_to_num(X, nan=0.5)
+        
+        # 2. 吸附到網格 (Snap to Grid)
+        idx = np.abs(X_clean[:, None] - self.unique_vals[None, :]).argmin(axis=1)
+        X_p = self.unique_vals[idx]
+        
+        # 3. 【關鍵修正】防呆回退機制
+        # 如果吸附後變成了常數 (unique size == 1)，代表網格太粗了，把所有差異都抹平了。
+        # 這時候我們直接回傳「原始預測值 (X_clean)」，保留原本的排名。
+        if np.unique(X_p).size == 1:
+            return X_clean
+            
+        return X_p
+
+# 3. Distribution Rounder (1st Place)
+class DistributionRounder:
+    def __init__(self, train_vals):
+        self.train_vals = np.sort(train_vals)
+        
+    def predict(self, X):
+        X = np.nan_to_num(X, nan=0.5)
+        n = len(X)
+        ranks = rankdata(X, method='ordinal') - 1
+        return np.interp(
+            np.linspace(0, 1, n),
+            np.linspace(0, 1, len(self.train_vals)),
+            self.train_vals
+        )[ranks]
+
+# ------------------- 推論與評估邏輯 -------------------
+def inference_fn(test_loader, model, device):
+    model.eval()
+    preds = []
+    
+    with torch.no_grad():
+        for batch in tqdm(test_loader, desc="Predicting"):
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            token_type_ids = batch.get('token_type_ids')
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids.to(device)
+            
+            y_preds = model(input_ids, attention_mask, token_type_ids)
+            # Regression Output: Sigmoid -> Probability
+            preds.append(y_preds.sigmoid().cpu().numpy())
+            
+    return np.concatenate(preds)
+
+def evaluate_all_methods(true_df, pred_df, target_cols):
+    print("\n" + "="*140)
+    print(f"{'Target Column':<40} | {'Raw':<10} | {'OptRound':<10} | {'Voters':<10} | {'Dist.' :<10}")
+    print("-" * 140)
+    
+    raw_scores = []
+    opt_scores = []
+    voter_scores = []
+    dist_scores = []
+    
+    for col in target_cols:
+        y_true = true_df[col].values
+        y_pred = pred_df[col].values
+        train_vals = true_df[col].values # 用於 Voters 和 Dist 的訓練分佈
+        
+        # 1. Raw
+        s_raw = spearmanr(y_true, y_pred).correlation
+        
+        # 2. Optimized Rounder
+        opt_rounder = OptimizedRounder()
+        opt_rounder.fit(y_pred, y_true)
+        y_opt = opt_rounder.predict(y_pred, opt_rounder.coef_)
+        s_opt = spearmanr(y_true, y_opt).correlation
+        
+        # 3. Voters Rounder
+        vote_rounder = VotersRounder(train_vals)
+        y_vote = vote_rounder.predict(y_pred)
+        s_vote = spearmanr(y_true, y_vote).correlation
+        
+        # 4. Distribution Rounder
+        dist_rounder = DistributionRounder(train_vals)
+        y_dist = dist_rounder.predict(y_pred)
+        s_dist = spearmanr(y_true, y_dist).correlation
+        
+        # 收集分數
+        raw_scores.append(s_raw)
+        opt_scores.append(s_opt)
+        voter_scores.append(s_vote)
+        dist_scores.append(s_dist)
+        
+        print(f"{col:<40} | {s_raw:.4f}     | {s_opt:.4f}     | {s_vote:.4f}     | {s_dist:.4f}")
+        
+    print("-" * 140)
+    print(f"{'AVERAGE':<40} | {np.mean(raw_scores):.4f}     | {np.mean(opt_scores):.4f}     | {np.mean(voter_scores):.4f}     | {np.mean(dist_scores):.4f}")
+    print("="*140 + "\n")
+
+# ------------------- Main -------------------
+if __name__ == '__main__':
+    if not os.path.exists(CFG.data_path):
+        print(f"Error: Data file not found at {CFG.data_path}")
+        sys.exit(1)
+        
+    print(f"Loading data from {CFG.data_path}...")
+    df = pd.read_csv(CFG.data_path)
+    print(f"Data shape: {df.shape}")
+    
+    # 1. Prepare DataLoader
+    tokenizer = AutoTokenizer.from_pretrained(CFG.base_model)
+    dataset = QuestDataset(df, tokenizer, max_len=CFG.max_len)
+    loader = DataLoader(dataset, batch_size=CFG.batch_size, shuffle=False, num_workers=CFG.num_workers)
+    
+    # 2. Find Models
+    if not os.path.exists(CFG.model_dir):
+        print(f"Error: Model directory {CFG.model_dir} does not exist.")
+        sys.exit(1)
+        
+    weight_paths = [os.path.join(CFG.model_dir, f) for f in os.listdir(CFG.model_dir) if f.endswith('.pth')]
+    if not weight_paths:
+        print(f"No .pth models found in {CFG.model_dir}")
+        sys.exit(1)
+    print(f"Found {len(weight_paths)} models: {[os.path.basename(p) for p in weight_paths]}")
+    
+    # 3. Inference loop
+    model_preds = []
+    
+    for weight_path in weight_paths:
+        print(f"\nProcessing {os.path.basename(weight_path)}...")
+        
+        # 回歸模型不需要 target_encoder，直接傳入 num_targets=30
+        model = QuestModel(
+            CFG.base_model, 
+            num_targets=len(TARGET_COLS),
+            pooling_strategy=CFG.pooling_strategy
+        )
+        model.load_state_dict(torch.load(weight_path, map_location=CFG.device))
+        model.to(CFG.device)
+        
+        preds = inference_fn(loader, model, CFG.device)
+        model_preds.append(preds)
+        
+        del model
+        torch.cuda.empty_cache()
+        
+    # 4. Average Predictions
+    avg_preds = np.mean(model_preds, axis=0)
+    
+    # 5. Evaluation with 4 Strategies
+    pred_df = pd.DataFrame(avg_preds, columns=TARGET_COLS)
+    
+    print("\nStarting Post-Processing Analysis...")
+    evaluate_all_methods(df, pred_df, TARGET_COLS)
