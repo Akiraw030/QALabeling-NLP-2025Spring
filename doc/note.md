@@ -216,6 +216,8 @@ Now we observe the performance of the model on each output feature
 |4th placed Voters|0.39557|0.37100|
 |1st placed Distribution|0.38678|0.36623|
 
+If the 4th placed voters got all the same output, then we leave it as original output (without any post-processing), this is the most reliable and best by experiment
+
 |Target Column                            | Raw        | OptRound   | Voters     | Dist. |
 |-|-|-|-|-|
 |question_asker_intent_understanding      | 0.4362     | 0.4362     | 0.4011     | 0.4033|
@@ -270,6 +272,6 @@ No k fold, 5 epochs
 
 5 folds, 10 epochs
 
-|Model|Public(Eval)|Private(Eval)|
-|-|-|-|
-|deberta-v3-base|||
+|Model|0Fold best|1Fold best|2Fold best|3Fold best|4Fold best|Public(Eval)(raw)|Private(Eval)(raw)|Public(Eval)(voters)|Private(Eval)(voters)|
+|-|-|-|-|-|-|-|-|-|-|
+|deberta-v3-base|Epoch 5 - Loss: 0.3616 - Raw Score: 0.4028|Epoch 5 - Loss: 0.3648 - Raw Score: 0.3984|Epoch 5 - Loss: 0.3652 - Raw Score: 0.3945|Epoch 4 - Loss: 0.3737 - Raw Score: 0.3955|Epoch 6 - Loss: 0.3538 - Raw Score: 0.4019|0.38781|0.36733|0.41158|0.38255|
