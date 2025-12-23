@@ -8,7 +8,7 @@ class QuestModel(nn.Module):
         self.pooling_strategy = pooling_strategy
         self.config = AutoConfig.from_pretrained(model_name)
         
-        if pooling_strategy == 'arch2':
+        if pooling_strategy in ['arch2', 'cls_mean_pool']:
             self.config.update({'output_hidden_states': True})
             
         self.backbone = AutoModel.from_pretrained(model_name, config=self.config)
@@ -65,6 +65,39 @@ class QuestModel(nn.Module):
                 nn.Linear(hidden_size * 4, num_targets)
             )
             self._init_weights(self.fc[1])
+        
+        elif self.pooling_strategy == 'cls_all':
+            # Concatenate CLS tokens from all hidden layers
+            # Feed into 6 heads with input_dim = hidden_size * num_hidden_states
+            num_hidden_states = self.config.num_hidden_layers + 1  # +1 for embedding layer
+            cls_concat_dim = hidden_size * num_hidden_states
+            self.head_g1 = self._make_head(cls_concat_dim, len(self.idx_g1), dropout_rate)
+            self.head_g2 = self._make_head(cls_concat_dim, len(self.idx_g2), dropout_rate)
+            self.head_g3 = self._make_head(cls_concat_dim, len(self.idx_g3), dropout_rate)
+            self.head_g4 = self._make_head(cls_concat_dim, len(self.idx_g4), dropout_rate)
+            self.head_g5 = self._make_head(cls_concat_dim, len(self.idx_g5), dropout_rate)
+            self.head_g6 = self._make_head(cls_concat_dim, len(self.idx_g6), dropout_rate)
+        
+        
+        elif self.pooling_strategy == 'mlp_only':
+            # MLP that reduces sequence length dimension to 1
+            # Works on [batch, feature, length] -> [batch, feature, 1]
+            self.mlp = nn.Sequential(
+                nn.Linear(512, hidden_size // 2),  # Max sequence length assumed 512
+                nn.Tanh(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(hidden_size // 2, 1)
+            )
+            self._init_weights(self.mlp[0])
+            self._init_weights(self.mlp[3])
+            
+            # 6 task-specific heads for 30 targets
+            self.head_g1 = self._make_head(hidden_size, len(self.idx_g1), dropout_rate)
+            self.head_g2 = self._make_head(hidden_size, len(self.idx_g2), dropout_rate)
+            self.head_g3 = self._make_head(hidden_size, len(self.idx_g3), dropout_rate)
+            self.head_g4 = self._make_head(hidden_size, len(self.idx_g4), dropout_rate)
+            self.head_g5 = self._make_head(hidden_size, len(self.idx_g5), dropout_rate)
+            self.head_g6 = self._make_head(hidden_size, len(self.idx_g6), dropout_rate)
 
     def _make_head(self, input_dim, output_dim, dropout_rate):
         """建立標準的 MLP Head"""
@@ -110,6 +143,12 @@ class QuestModel(nn.Module):
         last_4_layers = all_hidden_states[-4:]
         cls_embeddings = [layer[:, 0, :] for layer in last_4_layers]
         return torch.cat(cls_embeddings, dim=1)
+    
+    def _pool_cls_mean(self, all_hidden_states):
+        """Concatenate CLS tokens from all hidden layers"""
+        # all_hidden_states: tuple of (num_layers,), each [batch, seq_len, hidden]
+        cls_embeddings = [layer[:, 0, :] for layer in all_hidden_states]  # List of [batch, hidden]
+        return torch.cat(cls_embeddings, dim=1)  # [batch, hidden * num_layers]
 
     def forward(self, input_ids, attention_mask, token_type_ids=None):
         outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
@@ -164,5 +203,61 @@ class QuestModel(nn.Module):
         elif self.pooling_strategy == 'arch2':
             feature = self._pool_arch2(outputs.hidden_states)
             output = self.fc(feature)
+            
+        elif self.pooling_strategy == 'cls_all':
+            # Mean pool CLS tokens from all hidden layers, feed into 6 heads
+            a_feat = self._pool_cls_mean(outputs.hidden_states)  # [batch, hidden_size]
+            
+            # Pass through 6 heads
+            out_g1 = self.head_g1(a_feat)
+            out_g2 = self.head_g2(a_feat)
+            out_g3 = self.head_g3(a_feat)
+            out_g4 = self.head_g4(a_feat)
+            out_g5 = self.head_g5(a_feat)
+            out_g6 = self.head_g6(a_feat)
+            
+            # Re-assemble output
+            batch_size = input_ids.size(0)
+            output = torch.zeros(batch_size, 30, dtype=out_g1.dtype, device=input_ids.device)
+            
+            output[:, self.idx_g1] = out_g1
+            output[:, self.idx_g2] = out_g2
+            output[:, self.idx_g3] = out_g3
+            output[:, self.idx_g4] = out_g4
+            output[:, self.idx_g5] = out_g5
+            output[:, self.idx_g6] = out_g6
+            
+            
+        elif self.pooling_strategy == 'mlp_only':
+            # --- MLP reduces sequence length dimension to 1 ---
+            batch_size, seq_len, hidden = last_hidden_state.shape
+            
+            # Transpose: [batch, length, feature] -> [batch, feature, length]
+            transposed = last_hidden_state.transpose(1, 2)  # [batch_size, hidden_size, seq_len]
+            
+            # Apply MLP to reduce length dimension to 1
+            # [batch, feature, length] -> [batch, feature, 1]
+            reduced = self.mlp(transposed)  # [batch_size, hidden_size, 1]
+            
+            # Squeeze length dimension: [batch, feature, 1] -> [batch, feature]
+            a_feat = reduced.squeeze(-1)  # [batch_size, hidden_size]
+            
+            # Pass through 6 heads
+            out_g1 = self.head_g1(a_feat)
+            out_g2 = self.head_g2(a_feat)
+            out_g3 = self.head_g3(a_feat)
+            out_g4 = self.head_g4(a_feat)
+            out_g5 = self.head_g5(a_feat)
+            out_g6 = self.head_g6(a_feat)
+            
+            # Re-assemble output
+            output = torch.zeros(batch_size, 30, dtype=out_g1.dtype, device=input_ids.device)
+            
+            output[:, self.idx_g1] = out_g1
+            output[:, self.idx_g2] = out_g2
+            output[:, self.idx_g3] = out_g3
+            output[:, self.idx_g4] = out_g4
+            output[:, self.idx_g5] = out_g5
+            output[:, self.idx_g6] = out_g6
             
         return output

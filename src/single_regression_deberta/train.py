@@ -24,17 +24,17 @@ POS_WEIGHT_VALUES = [
 class CFG:
     model_name = 'microsoft/deberta-v3-base'
     
-    pooling_strategy = 'arch1_6groups' 
+    pooling_strategy = 'cls_mean_pool' 
     
     # 【關鍵開關】
     # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
     # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
-    use_kfold = True
+    use_kfold = False
     
     max_len = 512
     batch_size = 4        
     accum_steps = 4       
-    epochs = 10            
+    epochs = 10        
     lr = 2e-5             
     head_lr = 1e-4        
     weight_decay = 0.01
@@ -42,7 +42,7 @@ class CFG:
     seed = 42
     n_fold = 5            # 只在 use_kfold=True 時生效
     val_size = 0.2        # 只在 use_kfold=False 時生效
-    num_workers = 2       
+    num_workers = 4      
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
     num_targets = len(TARGET_COLS)

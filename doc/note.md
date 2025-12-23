@@ -252,21 +252,65 @@ If the 4th placed voters got all the same output, then we leave it as original o
 |answer_well_written                      | 0.2722     | 0.2722     | 0.2048     | 0.2602|
 |AVERAGE                                  | 0.4729     | 0.5310     | 0.5024     | 0.5096|
 
+## The use of differnet basemodel infos and projector 2
+
+No k fold, 10 epochs, deberta-v3-base
+
+|Model|Best epoch|Public(Eval)|Private(Eval)|
+|-|-|-|-|
+|1. using CLS + mean pooling + mean of QA only each|Epoch 6 Loss: 0.3519 - Raw Score: 0.4018|0.38537|0.37233|
+|2. transposed then MLP to length 1, then 6 heads mlp to 30 output features|Epoch 6 Loss: 0.3566 - Raw Score: 0.3824|0.38675|0.35503|
+|3. using every basemodel hidden layer's CLS token|Epoch 7 Loss: 0.3584 - Raw Score: 0.3845|0.37788|0.34859|
+
+|Target Column                            | 1. | 2. | 3. | 
+|-|-|-|-|-|
+|question_asker_intent_understanding      | 0.4510 | 0.4488 | 0.4221 |
+|question_body_critical                   | 0.6884 | 0.6637 | 0.6715 |
+|question_conversational                  | 0.4737 | 0.4709 | 0.4679 |
+|question_expect_short_answer             | 0.4638 | 0.4438 | 0.4439 |
+|question_fact_seeking                    | 0.5507 | 0.5407 | 0.5283 |
+|question_has_commonly_accepted_answer    | 0.5664 | 0.5667 | 0.5521 |
+|question_interestingness_others          | 0.4094 | 0.4161 | 0.3832 |
+|question_interestingness_self            | 0.5631 | 0.5586 | 0.5068 |
+|question_multi_intent                    | 0.6886 | 0.6766 | 0.6659 |
+|question_not_really_a_question           | 0.1432 | 0.1365 | 0.1344 |
+|question_opinion_seeking                 | 0.6511 | 0.6418 | 0.6347 |
+|question_type_choice                     | 0.8114 | 0.8019 | 0.8066 |
+|question_type_compare                    | 0.4069 | 0.4064 | 0.4010 |
+|question_type_consequence                | 0.2295 | 0.2272 | 0.2260 |
+|question_type_definition                 | 0.3828 | 0.3795 | 0.3773 |
+|question_type_entity                     | 0.5174 | 0.5117 | 0.5096 |
+|question_type_instructions               | 0.8469 | 0.8373 | 0.8297 |
+|question_type_procedure                  | 0.5517 | 0.5315 | 0.5182 |
+|question_type_reason_explanation         | 0.7705 | 0.7703 | 0.7587 |
+|question_type_spelling                   | 0.0708 | 0.0714 | 0.0690 |
+|question_well_written                    | 0.6195 | 0.5875 | 0.5720 |
+|answer_helpful                           | 0.3544 | 0.3165 | 0.2521 |
+|answer_level_of_information              | 0.4725 | 0.4169 | 0.4177 |
+|answer_plausible                         | 0.2560 | 0.2367 | 0.1818 |
+|answer_relevance                         | 0.2723 | 0.2494 | 0.2183 |
+|answer_satisfaction                      | 0.4341 | 0.3759 | 0.3305 |
+|answer_type_instructions                 | 0.8353 | 0.8206 | 0.8100 |
+|answer_type_procedure                    | 0.5251 | 0.4616 | 0.4638 |
+|answer_type_reason_explanation           | 0.8108 | 0.7658 | 0.7578 |
+|answer_well_written                      | 0.3197 | 0.2609 | 0.2250 |
+|AVERAGE                                  | 0.5046 | 0.4864 | 0.4712 |
+
 ## The use of differnet models
 
-No k fold, 5 epochs
+No k fold, 10 epochs
 
-|Model|Public(Eval)|Private(Eval)|
-|-|-|-|
-|deberta-v3-base|||
-|Llama|||
-|Qwen|||
-|roberta|||
-|Mistral|||
-|Phi|||
-|bge|||
-|instructor|||
-|E5|||
+|Model|Best Epoch|Public(Eval)|Private(Eval)|
+|-|-|-|-|
+|deberta-v3-base|Epoch 6 Loss: 0.3519 - Raw Score: 0.4018|0.38537|0.37233|
+|Qwen||||
+|Llama||||
+|roberta||||
+|Mistral||||
+|Phi||||
+|bge||||
+|instructor||||
+|E5||||
 
 ## The combinations of final models
 
