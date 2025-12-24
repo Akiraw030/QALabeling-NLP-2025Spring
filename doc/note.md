@@ -302,49 +302,46 @@ No k fold, 10 epochs
 
 |Model|Best Epoch|Public(Eval)|Private(Eval)|
 |-|-|-|-|
-|deberta-v3-base|Epoch 6 Loss: 0.3519 - Raw Score: 0.4018|0.38537|0.37233|
+|Deberta-v3-base|Epoch 6 Loss: 0.3519 - Raw Score: 0.4018|0.38537|0.37233|
 |Qwen-3.0-0.6b|Epoch 3 - Loss: 0.3635 - Raw Score: 0.4001|0.39340|0.36745|
-|Llama||||
-|roberta||||
-|Mistral||||
-|Phi||||
-|bge||||
-|instructor||||
-|E5||||
+|Llama-2.3-1b|Epoch 5 - Loss: 0.3106 - Raw Score: 0.3919|0.36701|0.33376|
+|ModernBERT-base|Epoch 4 - Loss: 0.3514 - Raw Score: 0.3904|0.37538|0.35005|
+|electra-base-discriminator|Epoch 4 - Loss: 0.3668 - Raw Score: 0.3999|0.38491|0.36928|
+|XLNet|Epoch 3 - Loss: 0.3715 - Raw Score: 0.4025|0.40235|0.36294|
 
-|Target Column                            | deberta | qwen
+|Target Column                            | deberta | qwen | llama | modernbert | electra | xlnet
 |-|-|-|-|-|
-|question_asker_intent_understanding      | 0.4510 | 0.5047
-|question_body_critical                   | 0.6884 | 0.7285
-|question_conversational                  | 0.4737 | 0.4828
-|question_expect_short_answer             | 0.4638 | 0.5099
-|question_fact_seeking                    | 0.5507 | 0.5594
-|question_has_commonly_accepted_answer    | 0.5664 | 0.5967
-|question_interestingness_others          | 0.4094 | 0.4573
-|question_interestingness_self            | 0.5631 | 0.6082
-|question_multi_intent                    | 0.6886 | 0.7222
-|question_not_really_a_question           | 0.1432 | 0.1511
-|question_opinion_seeking                 | 0.6511 | 0.6731
-|question_type_choice                     | 0.8114 | 0.8243
-|question_type_compare                    | 0.4069 | 0.4165
-|question_type_consequence                | 0.2295 | 0.2320
-|question_type_definition                 | 0.3828 | 0.3833
-|question_type_entity                     | 0.5174 | 0.5256
-|question_type_instructions               | 0.8469 | 0.8472
-|question_type_procedure                  | 0.5517 | 0.5644
-|question_type_reason_explanation         | 0.7705 | 0.7973
-|question_type_spelling                   | 0.0708 | 0.0712
-|question_well_written                    | 0.6195 | 0.6351
-|answer_helpful                           | 0.3544 | 0.4124
-|answer_level_of_information              | 0.4725 | 0.4678
-|answer_plausible                         | 0.2560 | 0.3289
-|answer_relevance                         | 0.2723 | 0.3177
-|answer_satisfaction                      | 0.4341 | 0.4847
-|answer_type_instructions                 | 0.8353 | 0.8476
-|answer_type_procedure                    | 0.5251 | 0.5410
-|answer_type_reason_explanation           | 0.8108 | 0.8314
-|answer_well_written                      | 0.3197 | 0.3151
-|AVERAGE                                  | 0.5046 | 0.5279
+|question_asker_intent_understanding      | 0.4510 | 0.5047 | 0.6447 | 0.5122 | 0.4277 | 0.4617
+|question_body_critical                   | 0.6884 | 0.7285 | 0.8142 | 0.7475 | 0.6588 | 0.6808
+|question_conversational                  | 0.4737 | 0.4828 | 0.5110 | 0.4875 | 0.4676 | 0.4706
+|question_expect_short_answer             | 0.4638 | 0.5099 | 0.7375 | 0.5188 | 0.3860 | 0.4419
+|question_fact_seeking                    | 0.5507 | 0.5594 | 0.7616 | 0.5901 | 0.4919 | 0.5009
+|question_has_commonly_accepted_answer    | 0.5664 | 0.5967 | 0.7251 | 0.5971 | 0.5417 | 0.5390
+|question_interestingness_others          | 0.4094 | 0.4573 | 0.6141 | 0.5127 | 0.4029 | 0.4400
+|question_interestingness_self            | 0.5631 | 0.6082 | 0.7239 | 0.6341 | 0.5332 | 0.5686
+|question_multi_intent                    | 0.6886 | 0.7222 | 0.8089 | 0.7127 | 0.6570 | 0.6674
+|question_not_really_a_question           | 0.1432 | 0.1511 | 0.1535 | 0.1482 | 0.1251 | 0.1333
+|question_opinion_seeking                 | 0.6511 | 0.6731 | 0.8242 | 0.6918 | 0.6102 | 0.6062
+|question_type_choice                     | 0.8114 | 0.8243 | 0.8593 | 0.8274 | 0.7911 | 0.7919
+|question_type_compare                    | 0.4069 | 0.4165 | 0.4231 | 0.4161 | 0.4018 | 0.4068
+|question_type_consequence                | 0.2295 | 0.2320 | 0.2387 | 0.2307 | 0.2068 | 0.2253
+|question_type_definition                 | 0.3828 | 0.3833 | 0.3912 | 0.3844 | 0.3828 | 0.3807
+|question_type_entity                     | 0.5174 | 0.5256 | 0.5384 | 0.5177 | 0.5070 | 0.5094
+|question_type_instructions               | 0.8469 | 0.8472 | 0.8963 | 0.8528 | 0.8283 | 0.8285
+|question_type_procedure                  | 0.5517 | 0.5644 | 0.7402 | 0.6015 | 0.4924 | 0.5010
+|question_type_reason_explanation         | 0.7705 | 0.7973 | 0.8692 | 0.7906 | 0.7457 | 0.7530
+|question_type_spelling                   | 0.0708 | 0.0712 | 0.0707 | 0.0727 | 0.0667 | 0.0719
+|question_well_written                    | 0.6195 | 0.6351 | 0.7699 | 0.6613 | 0.5656 | 0.5752
+|answer_helpful                           | 0.3544 | 0.4124 | 0.6133 | 0.3950 | 0.3028 | 0.3322
+|answer_level_of_information              | 0.4725 | 0.4678 | 0.5790 | 0.4947 | 0.4394 | 0.4489
+|answer_plausible                         | 0.2560 | 0.3289 | 0.5038 | 0.3044 | 0.2260 | 0.2495
+|answer_relevance                         | 0.2723 | 0.3177 | 0.4765 | 0.2951 | 0.2413 | 0.2531
+|answer_satisfaction                      | 0.4341 | 0.4847 | 0.6691 | 0.4581 | 0.3660 | 0.4221
+|answer_type_instructions                 | 0.8353 | 0.8476 | 0.8987 | 0.8384 | 0.8138 | 0.8121
+|answer_type_procedure                    | 0.5251 | 0.5410 | 0.7072 | 0.5566 | 0.4390 | 0.4457
+|answer_type_reason_explanation           | 0.8108 | 0.8314 | 0.8881 | 0.7952 | 0.7622 | 0.7768
+|answer_well_written                      | 0.3197 | 0.3151 | 0.5750 | 0.3607 | 0.2624 | 0.3306
+|AVERAGE                                  | 0.5046 | 0.5279 | 0.6342 | 0.5335 | 0.4714 | 0.4875
 
 ## The combinations of final models
 
