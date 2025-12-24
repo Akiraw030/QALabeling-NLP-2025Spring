@@ -13,18 +13,20 @@ import html
 # ------------------- 配置 (Configuration) -------------------
 class CFG:
     # 模型權重資料夾 (請確保這裡放的是 Regression 版本的 .pth)
-    model_dir = "model/v13_deberta_original" 
+    model_dir = "model/v15_qwen" 
     
     # 訓練資料路徑 (用來評估)
     data_path = "./data/train.csv"
     
-    base_model = "microsoft/deberta-v3-base" 
+    base_model = "Qwen/Qwen3-0.6B" 
     pooling_strategy = 'arch1_6groups' 
     max_len = 512
     batch_size = 16
     num_workers = 4
     seed = 42
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    trust_remote_code = True
+    freeze_backbone = False
 
 # 原始 30 個目標欄位
 TARGET_COLS = [
@@ -89,15 +91,19 @@ class QuestDataset(Dataset):
 
 # ------------------- 模型定義 (Regression Version) -------------------
 class QuestModel(nn.Module):
-    def __init__(self, model_name, num_targets, pooling_strategy='arch1_6groups', dropout_rate=0.1):
+    def __init__(self, model_name, num_targets, pooling_strategy='arch1_6groups', dropout_rate=0.1, trust_remote_code=False, freeze_backbone=False):
         super().__init__()
         self.pooling_strategy = pooling_strategy
-        self.config = AutoConfig.from_pretrained(model_name)
+        self.config = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
         
         if pooling_strategy == 'cls_all':
-            self.config.update({'output_hidden_states': True})
+            self.config.output_hidden_states = True
             
-        self.backbone = AutoModel.from_pretrained(model_name, config=self.config)
+        self.backbone = AutoModel.from_pretrained(model_name, config=self.config, trust_remote_code=trust_remote_code)
+        
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
         hidden_size = self.config.hidden_size
         
         # 定義 6-Head 分群索引
@@ -157,20 +163,25 @@ class QuestModel(nn.Module):
         sum_embeddings = torch.sum(hidden_state * input_mask_expanded, 1)
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         return sum_embeddings / sum_mask
+    
+    def _last_token_pool(self, last_hidden_state, attention_mask):
+        """Qwen official pooling: extract last token (supports left/right padding)"""
+        left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+        if left_padding:
+            return last_hidden_state[:, -1]
+        else:
+            sequence_lengths = attention_mask.sum(dim=1) - 1
+            batch_size = last_hidden_state.shape[0]
+            return last_hidden_state[torch.arange(batch_size, device=last_hidden_state.device), sequence_lengths]
 
     def _get_pooling_features(self, last_hidden_state, attention_mask, token_type_ids):
-        cls_token = last_hidden_state[:, 0, :]
+        # Qwen uses last-token pooling (official method)
+        last_token = self._last_token_pool(last_hidden_state, attention_mask)
         global_avg = self._masked_mean_pooling(last_hidden_state, attention_mask)
-        
-        if token_type_ids is None:
-            q_avg = global_avg; a_avg = global_avg
-        else:
-            q_mask = attention_mask * (1 - token_type_ids)
-            q_avg = self._masked_mean_pooling(last_hidden_state, q_mask)
-            a_mask = attention_mask * token_type_ids
-            a_avg = self._masked_mean_pooling(last_hidden_state, a_mask)
-            
-        return cls_token, global_avg, q_avg, a_avg
+        # Qwen has no token_type_ids; use shared features for Q/A
+        q_repr = last_token
+        a_repr = last_token
+        return last_token, global_avg, q_repr, a_repr
     
     def _pool_cls_concat(self, all_hidden_states):
         """Concatenate CLS tokens from all hidden layers"""
@@ -182,17 +193,16 @@ class QuestModel(nn.Module):
         last_hidden_state = outputs.last_hidden_state
         
         if self.pooling_strategy == 'arch1_6groups':
-            cls, glob, q, a = self._get_pooling_features(last_hidden_state, attention_mask, token_type_ids)
+            last_tok, glob, q, a = self._get_pooling_features(last_hidden_state, attention_mask, token_type_ids)
+            # Qwen: use shared feature for all groups (no token_type_ids)
+            feat_shared = torch.cat([last_tok, glob, last_tok], dim=1)
             
-            feat_pure_q = torch.cat([cls, glob, q], dim=1)
-            feat_pure_a = torch.cat([cls, glob, a], dim=1)
-            
-            out_g1 = self.head_g1(feat_pure_q)
-            out_g2 = self.head_g2(feat_pure_q)
-            out_g3 = self.head_g3(feat_pure_q)
-            out_g4 = self.head_g4(feat_pure_q)
-            out_g5 = self.head_g5(feat_pure_a)
-            out_g6 = self.head_g6(feat_pure_a)
+            out_g1 = self.head_g1(feat_shared)
+            out_g2 = self.head_g2(feat_shared)
+            out_g3 = self.head_g3(feat_shared)
+            out_g4 = self.head_g4(feat_shared)
+            out_g5 = self.head_g5(feat_shared)
+            out_g6 = self.head_g6(feat_shared)
             
             batch_size = input_ids.size(0)
             output = torch.zeros(batch_size, 30, dtype=out_g1.dtype, device=input_ids.device)
@@ -306,7 +316,7 @@ if __name__ == '__main__':
     print(f"Data shape: {df.shape}")
     
     # 1. Prepare DataLoader
-    tokenizer = AutoTokenizer.from_pretrained(CFG.base_model)
+    tokenizer = AutoTokenizer.from_pretrained(CFG.base_model, trust_remote_code=CFG.trust_remote_code)
     dataset = QuestDataset(df, tokenizer, max_len=CFG.max_len)
     loader = DataLoader(dataset, batch_size=CFG.batch_size, shuffle=False, num_workers=CFG.num_workers)
     
@@ -331,7 +341,9 @@ if __name__ == '__main__':
         model = QuestModel(
             CFG.base_model, 
             num_targets=len(TARGET_COLS),
-            pooling_strategy=CFG.pooling_strategy
+            pooling_strategy=CFG.pooling_strategy,
+            trust_remote_code=CFG.trust_remote_code,
+            freeze_backbone=CFG.freeze_backbone
         )
         model.load_state_dict(torch.load(weight_path, map_location=CFG.device))
         model.to(CFG.device)
