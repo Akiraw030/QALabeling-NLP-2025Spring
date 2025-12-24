@@ -3,12 +3,13 @@ pandas
 scipy
 scikit-learn
 tqdm
-transformers
+transformers>=4.36.0
 accelerate
 sentencepiece
 protobuf
 torch
-torchvision
+huggingface-hub
+bitsandbytes
 
 seaborn
 matplotlib
