@@ -1,8 +1,7 @@
+import os
 # Disable torch.compile to avoid C compiler requirement for ModernBERT
 os.environ['TORCH_COMPILE_DISABLE'] = '1'
 os.environ['TORCH_DYNAMO_DISABLE'] = '1'
-
-import os
 import gc
 import numpy as np
 import pandas as pd
