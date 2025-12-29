@@ -78,12 +78,12 @@ All models use a **6-Head grouped architecture** to capture correlations between
 Install dependencies:
 
 ```bash
+conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
 pip install -r requirements.txt
 ```
 
 Requires Python ≥ 3.8, PyTorch with CUDA, and Transformers ≥ 4.20. GPU with ≥12GB VRAM recommended.
-
----
+If you encounter compatibility issues with ModernBERT on newer Python versions, consider using Python 3.10 or earlier.
 
 ### Step 2: Prepare Dataset
 

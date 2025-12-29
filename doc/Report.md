@@ -195,7 +195,7 @@ Below table lists the models we apply for final ensemble with their training los
 |-|-|-|-|-|-|
 |Deberta-v3-base|Epoch 6 - Loss: 0.3519 - Raw Score: 0.4003|Epoch 6 - Loss: 0.3565 - Raw Score: 0.3938|Epoch 6 - Loss: 0.3550 - Raw Score: 0.4084|Epoch 6 - Loss: 0.3571 - Raw Score: 0.3900|Epoch 5 - Loss: 0.3610 - Raw Score: 0.4052|
 |Qwen-3.0-0.6b|Epoch 3 - Loss: 0.3556 - Raw Score: 0.3952|Epoch 3 - Loss: 0.3561 - Raw Score: 0.3920|Epoch 3 - Loss: 0.3545 - Raw Score: 0.3960|Epoch 3 - Loss: 0.3545 - Raw Score: 0.3887|Epoch 3 - Loss: 0.3492 - Raw Score: 0.4068|
-|Llama-3.2-1b|Epoch 3 - Loss: 0.3659 - Raw Score: 0.3889|Epoch 3 - Loss: 0.3673 - Raw Score: 0.3848|Epoch 4 - Loss: 0.3344 - Raw Score: 0.3889|
+|Llama-3.2-1b|Epoch 3 - Loss: 0.3659 - Raw Score: 0.3889|Epoch 3 - Loss: 0.3673 - Raw Score: 0.3848|Epoch 4 - Loss: 0.3344 - Raw Score: 0.3889|Epoch 3 - Loss: 0.3695 - Raw Score: 0.3762|Epoch 3 - Loss: 0.3653 - Raw Score: 0.3956|
 |ModernBERT-base|Epoch 3 - Loss: 0.3704 - Raw Score: 0.3813|Epoch 3 - Loss: 0.3676 - Raw Score: 0.3891|Epoch 2 - Loss: 0.3868 - Raw Score: 0.3833|Epoch 3 - Loss: 0.3642 - Raw Score: 0.3801|Epoch 3 - Loss: 0.3663 - Raw Score: 0.3878|
 |electra-base-discriminator|Epoch 6 - Loss: 0.3509 - Raw Score: 0.3926|Epoch 6 - Loss: 0.3517 - Raw Score: 0.3822|Epoch 4 - Loss: 0.3657 - Raw Score: 0.4010|Epoch 5 - Loss: 0.3589 - Raw Score: 0.3808|Epoch 5 - Loss: 0.3569 - Raw Score: 0.4025|
 |XLNet|Epoch 3 - Loss: 0.3697 - Raw Score: 0.3971|Epoch 4 - Loss: 0.3592 - Raw Score: 0.3934|Epoch 3 - Loss: 0.3700 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3715 - Raw Score: 0.3845|Epoch 3 - Loss: 0.3683 - Raw Score: 0.4032|

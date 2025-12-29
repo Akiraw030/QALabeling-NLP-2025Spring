@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-TPE-Optimized Ensemble Weight Calculation
-Computes optimal weights for blending transformer model predictions using Tree-structured Parzen Estimator (TPE).
-Can run on local machine with internet connection.
+Hierarchical TPE Optimization
+First optimizes fold weights for each model, then optimizes model weights using the fold-optimized predictions.
 """
 
 import os
@@ -41,10 +40,6 @@ TARGET_COLS = [
     "answer_satisfaction", "answer_type_instructions", "answer_type_procedure",
     "answer_type_reason_explanation", "answer_well_written",
 ]
-
-# ============================================================================
-# Configuration - Normal HuggingFace model names (will download from internet)
-# ============================================================================
 
 MODEL_PATHS = {
     'deberta_v3': {
@@ -94,11 +89,8 @@ class Config:
     num_workers: int = 4
     tpe_trials: int = 50
     seed: int = 42
-    optimize_fold_weights: bool = False
-    use_voter_postprocessing: bool = False
-    voter_dev_threshold: float = 0.01
-    output_weights_path: str = "tpe_weights.json"
-    weights_dir: Optional[str] = None  # Path to directory with .pth weight files
+    weights_dir: str = "./model"
+    output_dir: str = "./tpe_results"
 
 # ============================================================================
 # Data Processing
@@ -248,7 +240,6 @@ def build_loader(df: pd.DataFrame, spec: ModelSpec, cfg: Config) -> Tuple[DataLo
     """Build DataLoader for a given model spec."""
     tokenizer_name = spec.tokenizer_path or spec.base_model
 
-    # Use fast DeBERTa tokenizer for DeBERTa models
     if "deberta" in spec.base_model.lower():
         tokenizer = DebertaV2TokenizerFast.from_pretrained(
             tokenizer_name,
@@ -268,36 +259,6 @@ def build_loader(df: pd.DataFrame, spec: ModelSpec, cfg: Config) -> Tuple[DataLo
     return loader, tokenizer
 
 
-class VotersRounder:
-    """Snap predictions to nearest observed training values with a deviation guard."""
-
-    def __init__(self, train_vals: np.ndarray, dev_threshold: float = 0.01):
-        clean_vals = train_vals[~np.isnan(train_vals)]
-        self.unique_vals = np.sort(np.unique(clean_vals))
-        self.dev_threshold = dev_threshold
-
-    def predict(self, preds: np.ndarray) -> np.ndarray:
-        preds = np.nan_to_num(preds, nan=0.5)
-        idx = np.abs(preds[:, None] - self.unique_vals[None, :]).argmin(axis=1)
-        snapped = self.unique_vals[idx]
-        if np.std(snapped) < self.dev_threshold:
-            return preds
-        return snapped
-
-
-def apply_voter_postprocessing(preds: np.ndarray, train_df: pd.DataFrame, dev_threshold: float) -> np.ndarray:
-    """Apply VotersRounder per target using training column distributions."""
-    rounded = preds.copy()
-    for i, col in enumerate(TARGET_COLS):
-        voter = VotersRounder(train_df[col].values, dev_threshold=dev_threshold)
-        rounded[:, i] = voter.predict(preds[:, i])
-    return rounded
-
-
-# ============================================================================
-# Inference Functions
-# ============================================================================
-
 def get_weight_paths(model_dir: str, prefix: str) -> List[str]:
     """Get sorted list of .pth files matching the prefix."""
     if not os.path.exists(model_dir):
@@ -306,81 +267,6 @@ def get_weight_paths(model_dir: str, prefix: str) -> List[str]:
     paths = [os.path.join(model_dir, f) for f in files]
     return sorted(paths)
 
-
-def inference_single_model(loader: DataLoader, spec: ModelSpec, weight_paths: Optional[List[str]] = None) -> np.ndarray:
-    """Run inference with a single model from HuggingFace, optionally loading local weights.
-    
-    If weight_paths provided, averages predictions from all weight checkpoints.
-    Otherwise, uses pretrained model directly.
-    """
-    if weight_paths:
-        # Average predictions across multiple weight checkpoints
-        all_preds = []
-        for weight_path in weight_paths:
-            model = QuestModel(
-                model_name=spec.base_model,
-                num_targets=len(TARGET_COLS),
-                pooling_strategy=spec.pooling_strategy,
-                trust_remote_code=spec.trust_remote_code,
-            )
-            state = torch.load(weight_path, map_location=device)
-            model.load_state_dict(state)
-            model.to(device)
-            model.eval()
-            
-            preds = []
-            with torch.no_grad():
-                for batch in tqdm(loader, desc=f"{spec.name}:{os.path.basename(weight_path)}", leave=False):
-                    input_ids = batch["input_ids"].to(device)
-                    attention_mask = batch["attention_mask"].to(device)
-                    token_type_ids = batch.get("token_type_ids")
-                    if token_type_ids is not None and spec.pass_token_type_ids:
-                        token_type_ids = token_type_ids.to(device)
-                    else:
-                        token_type_ids = None
-                    outputs = model(input_ids, attention_mask, token_type_ids)
-                    preds.append(outputs.sigmoid().cpu().numpy())
-            
-            all_preds.append(np.concatenate(preds))
-            del model
-            torch.cuda.empty_cache()
-            gc.collect()
-        
-        # Average across checkpoints
-        return np.mean(np.stack(all_preds), axis=0)
-    else:
-        # Use pretrained model directly
-        model = QuestModel(
-            model_name=spec.base_model,
-            num_targets=len(TARGET_COLS),
-            pooling_strategy=spec.pooling_strategy,
-            trust_remote_code=spec.trust_remote_code,
-        )
-        model.to(device)
-        model.eval()
-
-        preds = []
-        with torch.no_grad():
-            for batch in tqdm(loader, desc=f"{spec.name}", leave=False):
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                token_type_ids = batch.get("token_type_ids")
-                if token_type_ids is not None and spec.pass_token_type_ids:
-                    token_type_ids = token_type_ids.to(device)
-                else:
-                    token_type_ids = None
-                outputs = model(input_ids, attention_mask, token_type_ids)
-                preds.append(outputs.sigmoid().cpu().numpy())
-
-        del model
-        torch.cuda.empty_cache()
-        gc.collect()
-        return np.concatenate(preds)
-
-
-# ============================================================================
-# TPE Weight Optimization
-# ============================================================================
 
 def tpe_weight_search(preds: np.ndarray, y_true: np.ndarray, max_evals: int, label: str = "model") -> np.ndarray:
     """Use TPE to find optimal weights for blending predictions."""
@@ -420,8 +306,150 @@ def blend_preds(preds: np.ndarray, weights: np.ndarray) -> np.ndarray:
     return np.tensordot(weights, preds, axes=((0), (0)))
 
 
+def load_fold_predictions(fold_paths: List[str], loader: DataLoader, spec: ModelSpec) -> Tuple[np.ndarray, List[str]]:
+    """Load predictions from multiple fold weight files."""
+    fold_preds = []
+    fold_names = []
+    
+    for weight_path in sorted(fold_paths):
+        model = QuestModel(
+            model_name=spec.base_model,
+            num_targets=len(TARGET_COLS),
+            pooling_strategy=spec.pooling_strategy,
+            trust_remote_code=spec.trust_remote_code,
+        )
+        state = torch.load(weight_path, map_location=device)
+        model.load_state_dict(state)
+        model.to(device)
+        model.eval()
+        
+        preds = []
+        with torch.no_grad():
+            for batch in tqdm(loader, desc=f"Loading {os.path.basename(weight_path)}", leave=False):
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                token_type_ids = batch.get("token_type_ids")
+                if token_type_ids is not None and spec.pass_token_type_ids:
+                    token_type_ids = token_type_ids.to(device)
+                else:
+                    token_type_ids = None
+                outputs = model(input_ids, attention_mask, token_type_ids)
+                preds.append(outputs.sigmoid().cpu().numpy())
+        
+        fold_pred = np.concatenate(preds)
+        fold_preds.append(fold_pred)
+        fold_names.append(os.path.basename(weight_path).replace('.pth', ''))
+        
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+    return np.stack(fold_preds), fold_names
+
+
 # ============================================================================
-# Main Execution
+# Stage 1: Fold-level Optimization
+# ============================================================================
+
+def optimize_model_folds(model_name: str, spec: ModelSpec, train_loader: DataLoader, 
+                         test_loader: DataLoader, y_true: np.ndarray, cfg: Config) -> Tuple[np.ndarray, np.ndarray, Dict]:
+    """Optimize fold weights for a single model."""
+    print(f"\n{'='*60}")
+    print(f"FOLD OPTIMIZATION: {model_name}")
+    print(f"{'='*60}")
+    
+    # Find fold weight files
+    fold_prefix = f"{model_name}_fold"
+    fold_files = get_weight_paths(cfg.weights_dir, fold_prefix)
+    
+    if not fold_files:
+        print(f"WARNING: No fold files found for {model_name}, skipping...")
+        return None, None, None
+    
+    print(f"Found {len(fold_files)} fold files")
+    
+    # Load fold predictions
+    print("Loading fold predictions from training set...")
+    fold_train_preds, fold_names = load_fold_predictions(fold_files, train_loader, spec)
+    
+    print("Loading fold predictions from test set...")
+    fold_test_preds, _ = load_fold_predictions(fold_files, test_loader, spec)
+    
+    # Individual fold scores
+    print("\nIndividual fold scores:")
+    for i, fold_name in enumerate(fold_names):
+        score = mean_spearman(y_true, fold_train_preds[i])
+        print(f"  {fold_name}: {score:.4f}")
+    
+    # Optimize fold weights
+    print(f"\nRunning TPE optimization for {len(fold_files)} folds...")
+    fold_weights = tpe_weight_search(
+        fold_train_preds, y_true,
+        max_evals=cfg.tpe_trials,
+        label=f"{model_name}_fold"
+    )
+    
+    # Blend predictions
+    blended_train = blend_preds(fold_train_preds, fold_weights)
+    blended_test = blend_preds(fold_test_preds, fold_weights)
+    
+    fold_score = mean_spearman(y_true, blended_train)
+    print(f"\nFold-optimized score: {fold_score:.4f}")
+    
+    # Save fold weights
+    fold_result = {
+        "model": model_name,
+        "score": float(fold_score),
+        "fold_weights": {name: float(w) for name, w in zip(fold_names, fold_weights)},
+    }
+    
+    return blended_train, blended_test, fold_result
+
+
+# ============================================================================
+# Stage 2: Model-level Optimization
+# ============================================================================
+
+def optimize_model_ensemble(model_train_preds: List[np.ndarray], model_test_preds: List[np.ndarray],
+                            model_names: List[str], y_true: np.ndarray, cfg: Config) -> Tuple[np.ndarray, np.ndarray, Dict]:
+    """Optimize weights across different models using their fold-optimized predictions."""
+    print(f"\n{'='*60}")
+    print(f"MODEL ENSEMBLE OPTIMIZATION")
+    print(f"{'='*60}")
+    
+    model_train_preds_np = np.stack(model_train_preds)
+    model_test_preds_np = np.stack(model_test_preds)
+    
+    print(f"\nOptimizing across {len(model_names)} models:")
+    for i, name in enumerate(model_names):
+        score = mean_spearman(y_true, model_train_preds[i])
+        print(f"  {name}: {score:.4f}")
+    
+    # Optimize model weights
+    print(f"\nRunning TPE optimization for model ensemble...")
+    model_weights = tpe_weight_search(
+        model_train_preds_np, y_true,
+        max_evals=cfg.tpe_trials,
+        label="model"
+    )
+    
+    # Blend predictions
+    final_train = blend_preds(model_train_preds_np, model_weights)
+    final_test = blend_preds(model_test_preds_np, model_weights)
+    
+    final_score = mean_spearman(y_true, final_train)
+    print(f"\nFinal ensemble score: {final_score:.4f}")
+    
+    model_result = {
+        "final_score": float(final_score),
+        "model_weights": {name: float(w) for name, w in zip(model_names, model_weights)},
+    }
+    
+    return final_train, final_test, model_result
+
+
+# ============================================================================
+# Main Hierarchical Optimization
 # ============================================================================
 
 def main(args):
@@ -430,31 +458,38 @@ def main(args):
         test_path=args.test_path,
         sample_frac=args.sample_frac,
         tpe_trials=args.tpe_trials,
-        output_weights_path=args.output,
+        weights_dir=args.weights_dir,
+        output_dir=args.output_dir,
     )
-
-    print(f"\nConfig:")
+    
+    # Create output directory
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    
+    print("\n" + "="*60)
+    print("HIERARCHICAL TPE OPTIMIZATION")
+    print("="*60)
+    print(f"\nConfiguration:")
     print(f"  Train: {cfg.train_path}")
     print(f"  Test: {cfg.test_path}")
+    print(f"  Weights dir: {cfg.weights_dir}")
+    print(f"  Output dir: {cfg.output_dir}")
     print(f"  Sample fraction: {cfg.sample_frac}")
     print(f"  TPE trials: {cfg.tpe_trials}")
-    print(f"  Output weights: {cfg.output_weights_path}")
-
+    
     # Load data
     print("\nLoading datasets...")
     train_df = pd.read_csv(cfg.train_path)
     test_df = pd.read_csv(cfg.test_path)
-
+    
     if cfg.sample_frac < 1.0:
         train_df = train_df.sample(frac=cfg.sample_frac, random_state=cfg.seed).reset_index(drop=True)
         print(f"Using {cfg.sample_frac:.1%} of training data: {len(train_df)} samples")
     else:
         print(f"Using full training data: {len(train_df)} samples")
-
-    print(f"Test data: {len(test_df)} samples")
+    
     y_true = train_df[TARGET_COLS].values
-
-    # Create model specs
+    
+    # Define models to process
     MODEL_SPECS = [
         ModelSpec(
             name="deberta_v3",
@@ -501,117 +536,140 @@ def main(args):
             trust_remote_code=True,
         ),
     ]
-
-    # Collect predictions from all models
-    print(f"\nCollecting predictions from {len(MODEL_SPECS)} models...")
+    
+    # ========================================================================
+    # STAGE 1: Optimize folds for each model
+    # ========================================================================
+    print("\n" + "#"*60)
+    print("# STAGE 1: FOLD-LEVEL OPTIMIZATION")
+    print("#"*60)
+    
     model_train_preds = []
     model_test_preds = []
+    model_names = []
+    fold_results = {}
     
-    # Prepare weight paths if weights_dir specified
-    weights_dir = getattr(args, 'weights_dir', None) or cfg.weights_dir
-    if weights_dir:
-        print(f"Will load weights from: {weights_dir}")
-
     for spec in MODEL_SPECS:
-        print(f"\n{'='*60}")
-        print(f"Processing: {spec.name}")
-        print(f"{'='*60}")
-
         try:
-            loader, _ = build_loader(train_df, spec, cfg)
+            # Build loaders
+            train_loader, _ = build_loader(train_df, spec, cfg)
             test_loader, _ = build_loader(test_df, spec, cfg)
             
-            # Find weight files if weights_dir specified
-            weight_files = None
-            if weights_dir:
-                weight_prefix = f"{spec.name}_fold"
-                weight_files = get_weight_paths(weights_dir, weight_prefix)
-                if weight_files:
-                    print(f"Found {len(weight_files)} weight files for {spec.name}")
-                else:
-                    print(f"No weight files found for {spec.name}, using pretrained model")
-
-            print(f"Running inference on train set...")
-            train_pred = inference_single_model(loader, spec, weight_files)
-
-            print(f"Running inference on test set...")
-            test_pred = inference_single_model(test_loader, spec, weight_files)
-
-            score = mean_spearman(y_true, train_pred)
-            print(f"{spec.name} train score: {score:.4f}")
-
-            model_train_preds.append(train_pred)
-            model_test_preds.append(test_pred)
-
+            # Optimize folds
+            blended_train, blended_test, fold_result = optimize_model_folds(
+                spec.name, spec, train_loader, test_loader, y_true, cfg
+            )
+            
+            if blended_train is not None:
+                model_train_preds.append(blended_train)
+                model_test_preds.append(blended_test)
+                model_names.append(spec.name)
+                fold_results[spec.name] = fold_result
+                
+                # Save individual fold weights
+                fold_output_path = os.path.join(cfg.output_dir, f"fold_weights_{spec.name}.json")
+                with open(fold_output_path, "w", encoding="utf-8") as f:
+                    json.dump(fold_result, f, indent=2)
+                print(f"✓ Saved fold weights to: {fold_output_path}")
+        
         except Exception as e:
             print(f"ERROR processing {spec.name}: {e}")
-            print(f"Skipping {spec.name}...")
+            import traceback
+            traceback.print_exc()
             continue
-
+    
     if len(model_train_preds) == 0:
         print("ERROR: No models were successfully processed!")
         return
-
-    model_train_preds_np = np.stack(model_train_preds)
-    model_test_preds_np = np.stack(model_test_preds)
-
-    print(f"\nCollected predictions from {len(model_train_preds)} models")
-    print(f"Train predictions shape: {model_train_preds_np.shape}")
-    print(f"Test predictions shape: {model_test_preds_np.shape}")
-
-    # TPE optimization
-    print(f"\nRunning TPE optimization across {len(MODEL_SPECS)} models...")
-    print(f"TPE trials: {cfg.tpe_trials}")
-
-    model_weights = tpe_weight_search(
-        model_train_preds_np, y_true,
-        max_evals=cfg.tpe_trials,
-        label="model"
+    
+    # ========================================================================
+    # STAGE 2: Optimize model ensemble weights
+    # ========================================================================
+    print("\n" + "#"*60)
+    print("# STAGE 2: MODEL-LEVEL OPTIMIZATION")
+    print("#"*60)
+    
+    final_train, final_test, model_result = optimize_model_ensemble(
+        model_train_preds, model_test_preds, model_names, y_true, cfg
     )
-
-    # Final predictions
-    final_train = blend_preds(model_train_preds_np, model_weights)
-    final_score = mean_spearman(y_true, final_train)
-
+    
+    # ========================================================================
+    # Save final results
+    # ========================================================================
     print("\n" + "="*60)
-    print("FINAL RESULTS")
+    print("SAVING RESULTS")
     print("="*60)
-    print(f"Training Spearman Score: {final_score:.4f}")
-    print("="*60)
-
-    # Save weights
-    weight_payload = {
-        "final_score": float(final_score),
-        "model_weights": {spec.name: float(w) for spec, w in zip(MODEL_SPECS[:len(model_train_preds)], model_weights)},
+    
+    # Save model weights
+    model_output_path = os.path.join(cfg.output_dir, "model_weights.json")
+    model_result["config"] = {
+        "tpe_trials": cfg.tpe_trials,
+        "sample_frac": cfg.sample_frac,
+    }
+    with open(model_output_path, "w", encoding="utf-8") as f:
+        json.dump(model_result, f, indent=2)
+    print(f"✓ Saved model weights to: {model_output_path}")
+    
+    # Save complete hierarchical results
+    hierarchical_result = {
+        "final_score": model_result["final_score"],
+        "model_weights": model_result["model_weights"],
+        "fold_weights": fold_results,
         "config": {
             "tpe_trials": cfg.tpe_trials,
             "sample_frac": cfg.sample_frac,
+            "weights_dir": cfg.weights_dir,
         }
     }
-
-    with open(cfg.output_weights_path, "w", encoding="utf-8") as f:
-        json.dump(weight_payload, f, indent=2)
-
-    print(f"\n✓ Weights saved to: {cfg.output_weights_path}")
-    print("\nWeight summary:")
-    print(json.dumps(weight_payload["model_weights"], indent=2))
+    
+    hierarchical_output_path = os.path.join(cfg.output_dir, "hierarchical_weights.json")
+    with open(hierarchical_output_path, "w", encoding="utf-8") as f:
+        json.dump(hierarchical_result, f, indent=2)
+    print(f"✓ Saved hierarchical weights to: {hierarchical_output_path}")
+    
+    # ========================================================================
+    # Summary
+    # ========================================================================
+    print("\n" + "="*60)
+    print("FINAL SUMMARY")
+    print("="*60)
+    print(f"\nFinal Training Spearman Score: {model_result['final_score']:.4f}")
+    print("\nModel Weights:")
+    for name, weight in model_result["model_weights"].items():
+        print(f"  {name}: {weight:.4f}")
+    print("\nFold-optimized Scores:")
+    for name, result in fold_results.items():
+        print(f"  {name}: {result['score']:.4f}")
+    print("="*60)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Calculate optimal ensemble weights using TPE optimization"
+        description="Hierarchical TPE optimization: optimize folds first, then models"
     )
     parser.add_argument(
         "--train-path",
         type=str,
-        default="train.csv",
+        default="./data/train.csv",
         help="Path to training CSV file"
     )
     parser.add_argument(
         "--test-path",
         type=str,
-        default="test.csv",
+        default="./data/test.csv",
         help="Path to test CSV file"
+    )
+    parser.add_argument(
+        "--weights-dir",
+        type=str,
+        required=True,
+        help="Directory containing fold .pth weight files (e.g., ./model)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="./tpe_results",
+        help="Output directory for all weight files"
     )
     parser.add_argument(
         "--sample-frac",
@@ -625,18 +683,6 @@ if __name__ == "__main__":
         default=50,
         help="Number of TPE optimization trials"
     )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="tpe_weights.json",
-        help="Output path for calculated weights JSON"
-    )
-    parser.add_argument(
-        "--weights-dir",
-        type=str,
-        default=None,
-        help="Optional: directory containing .pth weight files (e.g., ./model). If not specified, uses pretrained models."
-    )
-
+    
     args = parser.parse_args()
     main(args)
