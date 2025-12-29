@@ -193,12 +193,12 @@ For our final model, we adapt the below strategy:
 Below table lists the models we apply for final ensemble with their training loss and validation scores:
 |Model|0F best|1F best|2F best|3F best|4F best|
 |-|-|-|-|-|-|
-|Deberta-v3-base|Epoch 5 - Loss: 0.3616 - Raw Score: 0.4028|Epoch 5 - Loss: 0.3648 - Raw Score: 0.3984|Epoch 5 - Loss: 0.3652 - Raw Score: 0.3945|Epoch 4 - Loss: 0.3737 - Raw Score: 0.3955|Epoch 6 - Loss: 0.3538 - Raw Score: 0.4019|
-|Qwen-3.0-0.6b|Epoch 3 - Loss: 0.3521 - Raw Score: 0.4011|Epoch 2 - Loss: 0.3820 - Raw Score: 0.4038|Epoch 3 - Loss: 0.3506 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3483 - Raw Score: 0.3875|Epoch 3 - Loss: 0.3518 - Raw Score: 0.4010
-|Llama-2.3-1b|Epoch 3 - Loss: 0.3756 - Raw Score: 0.3917|Epoch 3 - Loss: 0.3759 - Raw Score: 0.3871|Epoch 4 - Loss: 0.3466 - Raw Score: 0.3917|Epoch 3 - Loss: 0.3772 - Raw Score: 0.3744|Epoch 3 - Loss: 0.3754 - Raw Score: 0.3867|
-|ModernBERT-base|Epoch 3 - Loss: 0.3707 - Raw Score: 0.3818|Epoch 3 - Loss: 0.3712 - Raw Score: 0.3933|Epoch 3 - Loss: 0.3674 - Raw Score: 0.3856|Epoch 3 - Loss: 0.3675 - Raw Score: 0.3787|Epoch 3 - Loss: 0.3711 - Raw Score: 0.3825|
-|electra-base-discriminator|Epoch 4 - Loss: 0.3668 - Raw Score: 0.3939|Epoch 5 - Loss: 0.3584 - Raw Score: 0.3933|Epoch 5 - Loss: 0.3597 - Raw Score: 0.3958|Epoch 5 - Loss: 0.3586 - Raw Score: 0.3900|Epoch 4 - Loss: 0.3664 - Raw Score: 0.3881|
-|XLNet|Epoch 4 - Loss: 0.3568 - Raw Score: 0.3919|Epoch 3 - Loss: 0.3702 - Raw Score: 0.3907|Epoch 4 - Loss: 0.3569 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3705 - Raw Score: 0.3878|Epoch 3 - Loss: 0.3695 - Raw Score: 0.3957|
+|Deberta-v3-base|Epoch 6 - Loss: 0.3519 - Raw Score: 0.4003|Epoch 6 - Loss: 0.3565 - Raw Score: 0.3938|Epoch 6 - Loss: 0.3550 - Raw Score: 0.4084|Epoch 6 - Loss: 0.3571 - Raw Score: 0.3900|Epoch 5 - Loss: 0.3610 - Raw Score: 0.4052|
+|Qwen-3.0-0.6b|Epoch 3 - Loss: 0.3556 - Raw Score: 0.3952|Epoch 3 - Loss: 0.3561 - Raw Score: 0.3920|Epoch 3 - Loss: 0.3545 - Raw Score: 0.3960|Epoch 3 - Loss: 0.3545 - Raw Score: 0.3887|Epoch 3 - Loss: 0.3492 - Raw Score: 0.4068|
+|Llama-3.2-1b|Epoch 3 - Loss: 0.3659 - Raw Score: 0.3889|Epoch 3 - Loss: 0.3673 - Raw Score: 0.3848|Epoch 4 - Loss: 0.3344 - Raw Score: 0.3889|
+|ModernBERT-base|Epoch 3 - Loss: 0.3704 - Raw Score: 0.3813|Epoch 3 - Loss: 0.3676 - Raw Score: 0.3891|Epoch 2 - Loss: 0.3868 - Raw Score: 0.3833|Epoch 3 - Loss: 0.3642 - Raw Score: 0.3801|Epoch 3 - Loss: 0.3663 - Raw Score: 0.3878|
+|electra-base-discriminator|Epoch 6 - Loss: 0.3509 - Raw Score: 0.3926|Epoch 6 - Loss: 0.3517 - Raw Score: 0.3822|Epoch 4 - Loss: 0.3657 - Raw Score: 0.4010|Epoch 5 - Loss: 0.3589 - Raw Score: 0.3808|Epoch 5 - Loss: 0.3569 - Raw Score: 0.4025|
+|XLNet|Epoch 3 - Loss: 0.3697 - Raw Score: 0.3971|Epoch 4 - Loss: 0.3592 - Raw Score: 0.3934|Epoch 3 - Loss: 0.3700 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3715 - Raw Score: 0.3845|Epoch 3 - Loss: 0.3683 - Raw Score: 0.4032|
 
 For the detail explanation and experiment about why we utilize above methods, see below experiments section.
 
@@ -707,4 +707,4 @@ With 30 distinct targets exhibiting low cross-correlations and weak question-ans
 
 
 # **Performance**
-![Result](./螢幕擷取畫面%202025-12-25%20231614.png)
+![Result](./5.png)

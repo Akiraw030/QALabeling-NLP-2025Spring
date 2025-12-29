@@ -23,27 +23,27 @@ POS_WEIGHT_VALUES = [
 
 # --- Configuration ---
 class CFG:
-    model_name = 'xlnet-base-cased'  # XLNet model
+    model_name = 'xlnet-base-cased' 
     
     pooling_strategy = 'arch1_6groups' 
     
-    # 【關鍵開關】
-    # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
-    # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
+    # Training mode toggle
+    # True  -> run full 5-fold GroupKFold (final submission)
+    # False -> single train/valid split (quick ablation)
     use_kfold = True
     
     max_len = 512
-    batch_size = 2        # Reduced for RTX 4060
-    accum_steps = 2       # Reduced accumulation steps
-    epochs = 6            # Fewer epochs for efficiency
-    lr = 1e-5             # Lower LR for stability
-    head_lr = 5e-5        # Proportionally lower head LR
+    batch_size = 2        
+    accum_steps = 2       
+    epochs = 6            
+    lr = 1e-5             
+    head_lr = 5e-5        
     weight_decay = 0.01
     max_grad_norm = 1.0   
     seed = 42
-    n_fold = 5            # 只在 use_kfold=True 時生效
-    val_size = 0.2        # 只在 use_kfold=False 時生效
-    num_workers = 2       # Reduced for memory efficiency
+    n_fold = 5            # Active only when use_kfold=True
+    val_size = 0.2        # Active only when use_kfold=False
+    num_workers = 2      
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
     num_targets = len(TARGET_COLS)
@@ -60,7 +60,7 @@ def seed_everything(seed=42):
 # --- Helper: Optimized Rounder ---
 class OptimizedRounder:
     def __init__(self):
-        self.coef_ = [0.05, 0.95] # 預設初始值
+        self.coef_ = [0.05, 0.95] # Default bounds
 
     def _loss_func(self, coef, X, y):
         X_p = np.copy(X)
@@ -192,23 +192,23 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(CFG.model_name)
     
     # ------------------------------------------------------------------
-    # 數據切分邏輯 (Splitting Logic)
+    # Splitting logic
     # ------------------------------------------------------------------
     splits = []
     
     if CFG.use_kfold:
-        # K-Fold 模式：產生 5 組 (train_idx, val_idx)
+        # K-Fold mode: generate 5 (train_idx, val_idx) pairs
         gkf = GroupKFold(n_splits=CFG.n_fold)
         splits = list(gkf.split(train, train[CFG.target_cols], train['question_body']))
     else:
-        # Single Run 模式：產生 1 組 (train_idx, val_idx)
-        # 為了相容下面的迴圈，我們手動取得索引並包成 list
+        # Single-run mode: generate one (train_idx, val_idx) pair
+        # Wrap indices in a list to reuse the loop below
         all_indices = np.arange(len(train))
         train_idx, val_idx = train_test_split(all_indices, test_size=CFG.val_size, random_state=CFG.seed)
-        splits = [(train_idx, val_idx)] # 包成列表，讓迴圈跑一次
+        splits = [(train_idx, val_idx)] # Single entry for the loop
 
     # ------------------------------------------------------------------
-    # 訓練迴圈 (相容 K-Fold 與 Single Run)
+    # Training loop (works for K-Fold and single run)
     # ------------------------------------------------------------------
     for fold, (train_idx, val_idx) in enumerate(splits):
         print(f"\n{'='*30} Fold {fold} {'='*30}")
@@ -231,7 +231,7 @@ if __name__ == '__main__':
         )
         model.to(CFG.device)
         
-        # 分層學習率 (Layer-wise Learning Rate)
+        # Layer-wise learning rates
         optimizer_parameters = [
             {'params': [p for n, p in model.backbone.named_parameters()], 'lr': CFG.lr},
             {'params': [p for n, p in model.named_parameters() if "backbone" not in n], 'lr': CFG.head_lr}

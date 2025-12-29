@@ -12,21 +12,20 @@ import html
 
 # ------------------- Configuration -------------------
 class CFG:
-    # 模型權重資料夾
+    # Directory containing model weights
     model_dir = "./model" 
     
-    # 訓練資料路徑 (用來評估)
+    # Training data path used for evaluation
     data_path = "./data/train.csv"
     
     base_model = "microsoft/deberta-v3-base" 
     pooling_strategy = 'arch1_6groups' 
     max_len = 512
     batch_size = 16
-    num_workers = 4 # 根據筆電 CPU 核心數調整
+    num_workers = 4
     seed = 42
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 原始 30 個目標欄位
 TARGET_COLS = [
     'question_asker_intent_understanding', 'question_body_critical', 'question_conversational',
     'question_expect_short_answer', 'question_fact_seeking', 'question_has_commonly_accepted_answer',
@@ -40,7 +39,7 @@ TARGET_COLS = [
     'answer_type_reason_explanation', 'answer_well_written'
 ]
 
-# 配合 6-Head Grouping 的排序
+# Sorted to match 6-head grouping
 GROUP_ORDER_INDICES = [
     3, 4, 5, 16, 17,          # G1
     0, 1, 6, 7, 20,           # G2
@@ -51,7 +50,7 @@ GROUP_ORDER_INDICES = [
 ]
 SORTED_TARGET_COLS = [TARGET_COLS[i] for i in GROUP_ORDER_INDICES]
 
-# ------------------- 核心模組 -------------------
+# ------------------- Core Modules -------------------
 def modern_preprocess(text):
     if pd.isna(text): return ""
     text = str(text)
@@ -137,7 +136,7 @@ class QuestDataset(Dataset):
             
         return item
 
-# ------------------- 模型定義 (Binary Version) -------------------
+# ------------------- Model Definition (Binary Version) -------------------
 class QuestModel(nn.Module):
     def __init__(self, model_name, target_encoder, pooling_strategy='arch1_6groups', dropout_rate=0.1):
         super().__init__()
@@ -215,7 +214,7 @@ class QuestModel(nn.Module):
         output = torch.cat([out_g1, out_g2, out_g3, out_g4, out_g5, out_g6], dim=1)
         return output
 
-# ------------------- 推論與評估邏輯 -------------------
+# ------------------- Inference and Evaluation -------------------
 def inference_fn(test_loader, model, device):
     model.eval()
     preds = []
@@ -244,7 +243,6 @@ def evaluate_metrics(true_df, pred_df, target_cols):
         y_true = true_df[col].values
         y_pred = pred_df[col].values
         
-        # 只計算 Spearman
         s_score, _ = spearmanr(y_true, y_pred)
         spearman_scores.append(s_score)
         
@@ -295,7 +293,7 @@ if __name__ == '__main__':
         
         binary_preds = inference_fn(loader, model, CFG.device)
         
-        # 還原分數
+        # Restore scores
         decoded_preds = target_encoder.inverse_transform(binary_preds)
         model_preds.append(decoded_preds)
         

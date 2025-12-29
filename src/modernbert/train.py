@@ -1,18 +1,9 @@
 import os
-# Disable torch.compile to avoid C compiler requirement for ModernBERT
-os.environ['TORCH_COMPILE_DISABLE'] = '1'
-os.environ['TORCH_DYNAMO_DISABLE'] = '1'
 import gc
 import numpy as np
 import pandas as pd
 import torch
-import torch
-torch._dynamo.config.suppress_errors = True  # Disable torch.compile() error suppression
 import torch.nn as nn
-
-# Disable torch.compile() globally to avoid C compiler requirements
-if hasattr(torch, '_compile_threshold'):
-    torch._compile_threshold = float('inf')
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.amp import GradScaler
@@ -32,13 +23,11 @@ POS_WEIGHT_VALUES = [
 
 # --- Configuration ---
 class CFG:
-    model_name = 'answerdotai/ModernBERT-base'  # ModernBERT for better efficiency
+    model_name = 'answerdotai/ModernBERT-base'
     
     pooling_strategy = 'arch1_6groups' 
     
-    # 【關鍵開關】
-    # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
-    # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
+    # Training mode switch: True for full 5-fold CV; False for a single train/valid split
     use_kfold = True
     
     max_len = 512
@@ -50,8 +39,8 @@ class CFG:
     weight_decay = 0.01
     max_grad_norm = 1.0   
     seed = 42
-    n_fold = 5            # 只在 use_kfold=True 時生效
-    val_size = 0.2        # 只在 use_kfold=False 時生效
+    n_fold = 5            # Used only when use_kfold=True
+    val_size = 0.2        # Used only when use_kfold=False
     num_workers = 2       # Reduced for memory efficiency
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
@@ -69,7 +58,7 @@ def seed_everything(seed=42):
 # --- Helper: Optimized Rounder ---
 class OptimizedRounder:
     def __init__(self):
-        self.coef_ = [0.05, 0.95] # 預設初始值
+        self.coef_ = [0.05, 0.95] # Default clipping bounds
 
     def _loss_func(self, coef, X, y):
         X_p = np.copy(X)
@@ -201,23 +190,22 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(CFG.model_name)
     
     # ------------------------------------------------------------------
-    # 數據切分邏輯 (Splitting Logic)
+    # Data split logic
     # ------------------------------------------------------------------
     splits = []
     
     if CFG.use_kfold:
-        # K-Fold 模式：產生 5 組 (train_idx, val_idx)
+        # K-Fold mode: create 5 (train_idx, val_idx) pairs
         gkf = GroupKFold(n_splits=CFG.n_fold)
         splits = list(gkf.split(train, train[CFG.target_cols], train['question_body']))
     else:
-        # Single Run 模式：產生 1 組 (train_idx, val_idx)
-        # 為了相容下面的迴圈，我們手動取得索引並包成 list
+        # Single run mode: create one (train_idx, val_idx) pair
         all_indices = np.arange(len(train))
         train_idx, val_idx = train_test_split(all_indices, test_size=CFG.val_size, random_state=CFG.seed)
-        splits = [(train_idx, val_idx)] # 包成列表，讓迴圈跑一次
+        splits = [(train_idx, val_idx)]
 
     # ------------------------------------------------------------------
-    # 訓練迴圈 (相容 K-Fold 與 Single Run)
+    # Training loop (works for K-Fold and single run)
     # ------------------------------------------------------------------
     for fold, (train_idx, val_idx) in enumerate(splits):
         print(f"\n{'='*30} Fold {fold} {'='*30}")
@@ -240,7 +228,7 @@ if __name__ == '__main__':
         )
         model.to(CFG.device)
         
-        # 分層學習率 (Layer-wise Learning Rate)
+        # Layer-wise learning rate setup
         optimizer_parameters = [
             {'params': [p for n, p in model.backbone.named_parameters()], 'lr': CFG.lr},
             {'params': [p for n, p in model.named_parameters() if "backbone" not in n], 'lr': CFG.head_lr}

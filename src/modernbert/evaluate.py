@@ -10,12 +10,12 @@ from tqdm.auto import tqdm
 from scipy.stats import spearmanr
 import html
 
-# ------------------- 配置 (Configuration) -------------------
+# ------------------- Configuration -------------------
 class CFG:
-    # 模型權重資料夾 (請確保這裡放的是 Regression 版本的 .pth)
+    # Model weights directory (ensure regression version .pth)
     model_dir = "model/v17_modernbert" 
     
-    # 訓練資料路徑 (用來評估)
+    # Training data path (for evaluation)
     data_path = "./data/train.csv"
     
     base_model = "answerdotai/ModernBERT-base" 
@@ -26,7 +26,6 @@ class CFG:
     seed = 42
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 原始 30 個目標欄位
 TARGET_COLS = [
     'question_asker_intent_understanding', 'question_body_critical', 'question_conversational',
     'question_expect_short_answer', 'question_fact_seeking', 'question_has_commonly_accepted_answer',
@@ -40,7 +39,7 @@ TARGET_COLS = [
     'answer_type_reason_explanation', 'answer_well_written'
 ]
 
-# ------------------- 資料處理 -------------------
+# ------------------- Data Processing -------------------
 def modern_preprocess(text):
     if pd.isna(text): return ""
     text = str(text)
@@ -87,7 +86,7 @@ class QuestDataset(Dataset):
             
         return item
 
-# ------------------- 模型定義 (Regression Version) -------------------
+# ------------------- Model Definition (Regression Version) -------------------
 class QuestModel(nn.Module):
     def __init__(self, model_name, num_targets, pooling_strategy='arch1_6groups', dropout_rate=0.1):
         super().__init__()
@@ -100,7 +99,7 @@ class QuestModel(nn.Module):
         self.backbone = AutoModel.from_pretrained(model_name, config=self.config)
         hidden_size = self.config.hidden_size
         
-        # 定義 6-Head 分群索引
+        # Define 6-head group indices
         self.idx_g1 = [3, 4, 5, 16, 17]          
         self.idx_g2 = [0, 1, 6, 7, 20]           
         self.idx_g3 = [2, 10]                    
@@ -109,7 +108,7 @@ class QuestModel(nn.Module):
         self.idx_g6 = [21, 22, 23, 24, 25, 28, 29] 
         
         if self.pooling_strategy == 'arch1_6groups':
-            # 回歸版本：輸出維度直接等於該組的目標數量
+            # Regression: output dims equal group target count
             self.head_g1 = self._make_head(hidden_size * 3, len(self.idx_g1), dropout_rate)
             self.head_g2 = self._make_head(hidden_size * 3, len(self.idx_g2), dropout_rate)
             self.head_g3 = self._make_head(hidden_size * 3, len(self.idx_g3), dropout_rate)
@@ -256,7 +255,7 @@ class QuestModel(nn.Module):
             
         return None
 
-# ------------------- 推論與評估邏輯 -------------------
+# ------------------- Inference and Evaluation -------------------
 def inference_fn(test_loader, model, device):
     model.eval()
     preds = []
@@ -270,7 +269,6 @@ def inference_fn(test_loader, model, device):
                 token_type_ids = token_type_ids.to(device)
             
             y_preds = model(input_ids, attention_mask, token_type_ids)
-            # Regression Output: Sigmoid -> Probability
             preds.append(y_preds.sigmoid().cpu().numpy())
             
     return np.concatenate(preds)
@@ -286,7 +284,6 @@ def evaluate_metrics(true_df, pred_df, target_cols):
         y_true = true_df[col].values
         y_pred = pred_df[col].values
         
-        # 只計算原始 Spearman
         score, _ = spearmanr(y_true, y_pred)
         scores.append(score)
         
@@ -328,7 +325,6 @@ if __name__ == '__main__':
     for weight_path in weight_paths:
         print(f"\nProcessing {os.path.basename(weight_path)}...")
         
-        # 回歸模型不需要 target_encoder，直接傳入 num_targets=30
         model = QuestModel(
             CFG.base_model, 
             num_targets=len(TARGET_COLS),

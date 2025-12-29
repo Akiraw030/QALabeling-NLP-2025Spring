@@ -17,12 +17,6 @@ TARGET_COLS = [
 ]
 
 def modern_preprocess(text):
-    """
-    Modern text preprocessing:
-    1. Convert to string
-    2. HTML unescape
-    3. Normalize whitespace
-    """
     if pd.isna(text):
         return ""
     text = str(text)

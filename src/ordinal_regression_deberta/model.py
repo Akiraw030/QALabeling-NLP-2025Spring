@@ -14,10 +14,10 @@ class QuestModel(nn.Module):
         self.backbone = AutoModel.from_pretrained(model_name, config=self.config)
         hidden_size = self.config.hidden_size
         
-        # 1. 計算每個 Group 需要的輸出維度
+        # 1. Compute required output dim per group
         all_cols = target_encoder.target_cols 
         
-        # 根據 SORTED_TARGET_COLS 的順序切分
+        # Slice groups according to SORTED_TARGET_COLS order
         g1_cols = all_cols[0:5]
         g2_cols = all_cols[5:10]
         g3_cols = all_cols[10:12]
@@ -33,7 +33,7 @@ class QuestModel(nn.Module):
                 dim += (slc.stop - slc.start)
             self.group_dims[g_name] = dim
             
-        # 2. 定義 Heads
+        # 2. Define heads
         if self.pooling_strategy == 'arch1_6groups':
             self.head_g1 = self._make_head(hidden_size * 3, self.group_dims['g1'], dropout_rate)
             self.head_g2 = self._make_head(hidden_size * 3, self.group_dims['g2'], dropout_rate)
@@ -96,7 +96,7 @@ class QuestModel(nn.Module):
             out_g5 = self.head_g5(feat_pure_a)
             out_g6 = self.head_g6(feat_pure_a)
             
-            # 直接 Concat (Dataset 已經按照這個順序排好 Label 了)
+            # Concatenate; dataset labels follow this order
             output = torch.cat([out_g1, out_g2, out_g3, out_g4, out_g5, out_g6], dim=1)
             return output
         

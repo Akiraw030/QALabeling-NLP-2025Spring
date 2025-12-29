@@ -39,7 +39,7 @@ class QuestModel(nn.Module):
         hidden_size = self.config.hidden_size
         
         # -----------------------------------------------------------------------
-        # 定義 6-Head 分群索引 (QA Splitted Strategy)
+        # Define 6-Head group indices (QA split strategy)
         # -----------------------------------------------------------------------
         # Question Groups (G1-G4)
         # [Group 1]: Fact, Instructions, Procedure
@@ -58,20 +58,20 @@ class QuestModel(nn.Module):
         self.idx_g6 = [21, 22, 23, 24, 25, 28, 29] 
         
         # -----------------------------------------------------------------------
-        # 定義 Heads
+        # Define heads
         # -----------------------------------------------------------------------
         if self.pooling_strategy == 'mean':
             self.fc = nn.Linear(hidden_size, num_targets)
             self._init_weights(self.fc)
             
         elif self.pooling_strategy == 'arch1':
-            # 舊版 2-Head 邏輯
+            # Legacy 2-Head logic
             self.q_head = self._make_head(hidden_size * 3, 21, dropout_rate)
             self.a_head = self._make_head(hidden_size * 3, 9, dropout_rate)
             
         elif self.pooling_strategy == 'arch1_6groups':
-            # --- 6-Head 策略 (QA Splitted) ---
-            # 所有的 Head 輸入都是 3 * hidden (因為只用純 Q 特徵 或 純 A 特徵)
+            # --- 6-Head strategy (QA split) ---
+            # All heads use 3 * hidden inputs (pure Q or pure A features)
             
             # Question Heads
             self.head_g1 = self._make_head(hidden_size * 3, len(self.idx_g1), dropout_rate)
@@ -91,7 +91,7 @@ class QuestModel(nn.Module):
             self._init_weights(self.fc[1])
 
     def _make_head(self, input_dim, output_dim, dropout_rate):
-        """建立標準的 MLP Head"""
+        """Build a standard MLP head"""
         head = nn.Sequential(
             nn.Linear(input_dim, self.config.hidden_size),
             nn.Tanh(),
@@ -125,7 +125,7 @@ class QuestModel(nn.Module):
         return sum_embeddings / sum_mask
 
     def _get_pooling_features(self, last_hidden_state, attention_mask, token_type_ids):
-        """提取基礎特徵：Llama uses mean pooling for better representation"""
+        """Extract base features: Llama uses mean pooling for better representation"""
         # Use mean pooling as primary representation
         global_avg = self._masked_mean_pooling(last_hidden_state, attention_mask)
         last_token = self._last_token_pool(last_hidden_state, attention_mask)
@@ -158,7 +158,7 @@ class QuestModel(nn.Module):
             output = self.fc(feature)
             
         elif self.pooling_strategy == 'arch1':
-            # 舊的 2-Head 邏輯
+            # Legacy 2-Head logic
             glob, last_tok, q, a = self._get_pooling_features(last_hidden_state, attention_mask, token_type_ids)
             q_feat = torch.cat([glob, last_tok, q], dim=1)
             a_feat = torch.cat([glob, last_tok, a], dim=1)
@@ -171,24 +171,24 @@ class QuestModel(nn.Module):
             # Llama has no token_type_ids, use shared features (mean + context)
             feat_shared = torch.cat([glob, last_tok, q], dim=1)
             
-            # 2. 通過各個 Head
-            # Q Groups 使用 Q 特徵
+            # 2. Pass through each head
+            # Q groups use Q features
             out_g1 = self.head_g1(feat_shared)
             out_g2 = self.head_g2(feat_shared)
             out_g3 = self.head_g3(feat_shared)
             out_g4 = self.head_g4(feat_shared)
             
-            # A Groups 使用 A 特徵
+            # A groups use A features
             out_g5 = self.head_g5(feat_shared)
             out_g6 = self.head_g6(feat_shared)
             
-            # 3. 輸出重組 (Re-assemble)
+            # 3. Reassemble output
             batch_size = input_ids.size(0)
             
-            # 【關鍵】確保 dtype 一致性 (for mixed precision)
+            # Ensure dtype consistency (mixed precision)
             output = torch.zeros(batch_size, 30, dtype=out_g1.dtype, device=input_ids.device)
             
-            # 依照索引填回去
+            # Assign by indices
             output[:, self.idx_g1] = out_g1
             output[:, self.idx_g2] = out_g2
             output[:, self.idx_g3] = out_g3

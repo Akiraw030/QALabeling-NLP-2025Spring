@@ -4,7 +4,6 @@ import torch
 from torch.utils.data import Dataset
 import html
 
-# 原始 30 個目標欄位
 TARGET_COLS = [
     'question_asker_intent_understanding', 'question_body_critical', 'question_conversational',
     'question_expect_short_answer', 'question_fact_seeking', 'question_has_commonly_accepted_answer',
@@ -18,14 +17,14 @@ TARGET_COLS = [
     'answer_type_reason_explanation', 'answer_well_written'
 ]
 
-# 為了配合 6-Head Grouping，我們定義重排後的順序
+# Define reordered indices to match 6-head grouping
 GROUP_ORDER_INDICES = [
-    3, 4, 5, 16, 17,          # G1 (Fact/Instructions)
-    0, 1, 6, 7, 20,           # G2 (Quality/Intent)
-    2, 10,                    # G3 (Conversational)
-    8, 9, 11, 12, 13, 14, 15, 18, 19, # G4 (Type/Class)
-    26, 27,                   # G5 (Ans: Instructions)
-    21, 22, 23, 24, 25, 28, 29 # G6 (Ans: Quality)
+    3, 4, 5, 16, 17,          
+    0, 1, 6, 7, 20,           
+    2, 10,                    
+    8, 9, 11, 12, 13, 14, 15, 18, 19, 
+    26, 27,                  
+    21, 22, 23, 24, 25, 28, 29 
 ]
 SORTED_TARGET_COLS = [TARGET_COLS[i] for i in GROUP_ORDER_INDICES]
 
@@ -38,8 +37,8 @@ def modern_preprocess(text):
 
 class BinaryTargetEncoder:
     """
-    負責將連續分數 (0.33) 转换为二进制阈值编码 ([1, 1, 0])
-    並負責將预测概率还原回连续分数
+    Encode continuous scores (e.g., 0.33) into binary threshold vectors (e.g., [1, 1, 0]),
+    and decode predicted probabilities back to continuous scores.
     """
     def __init__(self, target_cols=SORTED_TARGET_COLS):
         self.target_cols = target_cols
@@ -49,13 +48,13 @@ class BinaryTargetEncoder:
         self.total_output_dim = 0
 
     def fit(self, df):
-        """扫描数据，构建编码规则"""
+        """Scan data to build encoding rules"""
         current_idx = 0
         for col in self.target_cols:
             uniques = sorted(df[col].unique())
             self.unique_values[col] = uniques
             
-            # 阈值是除了最大值以外的所有值
+            # Thresholds are all unique values except the max
             if len(uniques) > 1:
                 thresh = uniques[:-1]
             else:
@@ -80,7 +79,7 @@ class BinaryTargetEncoder:
             threshs = self.thresholds[col]
             
             for j, t in enumerate(threshs):
-                # 核心逻辑: 如果值大于阈值，则该位为 1
+                # Core logic: if value > threshold, set bit to 1
                 output[:, slc.start + j] = (vals > t + 1e-5).astype(np.float32)
         return output
 
@@ -92,7 +91,7 @@ class BinaryTargetEncoder:
         for i, col in enumerate(self.target_cols):
             slc = self.output_slices[col]
             col_preds = binary_preds[:, slc]
-            # 还原逻辑: 取平均 (期望值近似)
+            # Decode by mean (expected value approximation)
             output[:, i] = col_preds.mean(axis=1)
         return output
 
@@ -111,7 +110,7 @@ class DebertaDataset(Dataset):
         self.answers = [modern_preprocess(a) for a in df['answer'].values]
         
         if self.is_train:
-            # 使用排序後的欄位
+            # Use reordered columns
             raw_targets = df[SORTED_TARGET_COLS].values
             if self.target_encoder is not None:
                 self.targets = self.target_encoder.transform(raw_targets)

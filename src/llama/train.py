@@ -22,28 +22,26 @@ POS_WEIGHT_VALUES = [
 
 # --- Configuration ---
 class CFG:
-    model_name = 'meta-llama/Llama-3.2-1B'  # Llama 3.2 1B for efficient finetuning
+    model_name = 'meta-llama/Llama-3.2-1B'
     pooling_strategy = 'arch1_6groups' 
-    trust_remote_code = False  # Llama doesn't require trust_remote_code
-    freeze_backbone = False  # Full finetuning: unfreeze backbone
+    trust_remote_code = False  
+    freeze_backbone = False  
     
-    # 【關鍵開關】
-    # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
-    # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
+    # Training mode switch: True for full 5-fold CV; False for a single train/valid split
     use_kfold = True
     
     max_len = 512
     batch_size = 1        
-    accum_steps = 4       # Increased for larger effective batch
-    epochs = 10            # Reduced epochs for initial testing
-    lr = 1e-5             # Lower backbone LR
-    head_lr = 5e-5        # Higher head LR        
+    accum_steps = 4      
+    epochs = 10          
+    lr = 1e-5            
+    head_lr = 5e-5       
     weight_decay = 0.01
     max_grad_norm = 1.0   
     seed = 42
-    use_bf16 = True       # Use bfloat16 (no GradScaler needed)
-    n_fold = 5            # 只在 use_kfold=True 時生效
-    val_size = 0.2        # 只在 use_kfold=False 時生效
+    use_bf16 = True       
+    n_fold = 5            # Used only when use_kfold=True
+    val_size = 0.2        # Used only when use_kfold=False
     num_workers = 4       
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     target_cols = TARGET_COLS
@@ -61,7 +59,7 @@ def seed_everything(seed=42):
 # --- Helper: Optimized Rounder ---
 class OptimizedRounder:
     def __init__(self):
-        self.coef_ = [0.05, 0.95] # 預設初始值
+        self.coef_ = [0.05, 0.95] # Default clipping bounds
 
     def _loss_func(self, coef, X, y):
         X_p = np.copy(X)
@@ -185,7 +183,6 @@ if __name__ == '__main__':
     if os.path.exists('./data/train.csv'):
         train = pd.read_csv('./data/train.csv')
     else:
-        # Fallback check
         if os.path.exists('train.csv'):
             train = pd.read_csv('train.csv')
         else:
@@ -198,23 +195,22 @@ if __name__ == '__main__':
         tokenizer.pad_token = tokenizer.eos_token
     
     # ------------------------------------------------------------------
-    # 數據切分邏輯 (Splitting Logic)
+    # Data split logic
     # ------------------------------------------------------------------
     splits = []
     
     if CFG.use_kfold:
-        # K-Fold 模式：產生 5 組 (train_idx, val_idx)
+        # K-Fold mode: create 5 (train_idx, val_idx) pairs
         gkf = GroupKFold(n_splits=CFG.n_fold)
         splits = list(gkf.split(train, train[CFG.target_cols], train['question_body']))
     else:
-        # Single Run 模式：產生 1 組 (train_idx, val_idx)
-        # 為了相容下面的迴圈，我們手動取得索引並包成 list
+        # Single run mode: create one (train_idx, val_idx) pair
         all_indices = np.arange(len(train))
         train_idx, val_idx = train_test_split(all_indices, test_size=CFG.val_size, random_state=CFG.seed)
-        splits = [(train_idx, val_idx)] # 包成列表，讓迴圈跑一次
+        splits = [(train_idx, val_idx)]
 
     # ------------------------------------------------------------------
-    # 訓練迴圈 (相容 K-Fold 與 Single Run)
+    # Training loop (works for K-Fold and single run)
     # ------------------------------------------------------------------
     for fold, (train_idx, val_idx) in enumerate(splits):
         print(f"\n{'='*30} Fold {fold} {'='*30}")

@@ -9,13 +9,12 @@ from transformers import AutoTokenizer, AutoModel, AutoConfig
 from tqdm.auto import tqdm
 from scipy.stats import spearmanr, rankdata
 import html
-import copy
 
-# ------------------- 配置 (Configuration) -------------------
+# ------------------- Configuration -------------------
 class CFG:
-    # 模型權重資料夾 (請確保這裡放的是 Regression 版本的 .pth)
+    # Model weights folder (ensure Regression version .pth files)
     model_dir = "./model" 
-    # 訓練資料路徑
+    # Training data path
     data_path = "./data/train.csv"
     
     base_model = "microsoft/deberta-v3-base" 
@@ -26,7 +25,6 @@ class CFG:
     seed = 42
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 目標欄位
 TARGET_COLS = [
     'question_asker_intent_understanding', 'question_body_critical', 'question_conversational',
     'question_expect_short_answer', 'question_fact_seeking', 'question_has_commonly_accepted_answer',
@@ -40,7 +38,7 @@ TARGET_COLS = [
     'answer_type_reason_explanation', 'answer_well_written'
 ]
 
-# ------------------- 資料處理 -------------------
+# ------------------- Data Processing -------------------
 def modern_preprocess(text):
     if pd.isna(text): return ""
     text = str(text)
@@ -87,7 +85,7 @@ class QuestDataset(Dataset):
             
         return item
 
-# ------------------- 模型定義 -------------------
+# ------------------- Model Definition -------------------
 class QuestModel(nn.Module):
     def __init__(self, model_name, num_targets, pooling_strategy='arch1_6groups', dropout_rate=0.1):
         super().__init__()
@@ -204,24 +202,19 @@ class OptimizedRounder:
         return X_p
 
 # 2. Voters Rounder (Fallback to Original)
-# 【修正】使用您指定的「回退到原始值」策略
 class VotersRounder:
     def __init__(self, train_vals):
-        # 過濾掉可能的 NaN，確保網格乾淨
+        # Filter possible NaNs to keep the grid clean
         clean_vals = train_vals[~np.isnan(train_vals)]
         self.unique_vals = np.sort(np.unique(clean_vals))
     
     def predict(self, X):
-        # 1. 清理輸入 NaN
+        # Clean input NaNs
         X_clean = np.nan_to_num(X, nan=0.5)
         
-        # 2. 吸附到網格 (Snap to Grid)
         idx = np.abs(X_clean[:, None] - self.unique_vals[None, :]).argmin(axis=1)
         X_p = self.unique_vals[idx]
         
-        # 3. 【關鍵修正】防呆回退機制
-        # 如果吸附後變成了常數 (unique size == 1)，代表網格太粗了，把所有差異都抹平了。
-        # 這時候我們直接回傳「原始預測值 (X_clean)」，保留原本的排名。
         if np.unique(X_p).size == 1:
             return X_clean
             
@@ -242,7 +235,7 @@ class DistributionRounder:
             self.train_vals
         )[ranks]
 
-# ------------------- 推論與評估邏輯 -------------------
+# ------------------- Inference and Evaluation -------------------
 def inference_fn(test_loader, model, device):
     model.eval()
     preds = []
@@ -256,7 +249,6 @@ def inference_fn(test_loader, model, device):
                 token_type_ids = token_type_ids.to(device)
             
             y_preds = model(input_ids, attention_mask, token_type_ids)
-            # Regression Output: Sigmoid -> Probability
             preds.append(y_preds.sigmoid().cpu().numpy())
             
     return np.concatenate(preds)
@@ -274,7 +266,7 @@ def evaluate_all_methods(true_df, pred_df, target_cols):
     for col in target_cols:
         y_true = true_df[col].values
         y_pred = pred_df[col].values
-        train_vals = true_df[col].values # 用於 Voters 和 Dist 的訓練分佈
+        train_vals = true_df[col].values # Training distribution for Voters and Distribution methods
         
         # 1. Raw
         s_raw = spearmanr(y_true, y_pred).correlation
@@ -295,7 +287,7 @@ def evaluate_all_methods(true_df, pred_df, target_cols):
         y_dist = dist_rounder.predict(y_pred)
         s_dist = spearmanr(y_true, y_dist).correlation
         
-        # 收集分數
+        # Collect scores
         raw_scores.append(s_raw)
         opt_scores.append(s_opt)
         voter_scores.append(s_vote)
@@ -339,7 +331,6 @@ if __name__ == '__main__':
     for weight_path in weight_paths:
         print(f"\nProcessing {os.path.basename(weight_path)}...")
         
-        # 回歸模型不需要 target_encoder，直接傳入 num_targets=30
         model = QuestModel(
             CFG.base_model, 
             num_targets=len(TARGET_COLS),

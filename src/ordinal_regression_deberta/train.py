@@ -11,7 +11,6 @@ from scipy.stats import spearmanr
 from sklearn.model_selection import GroupKFold, train_test_split
 from tqdm import tqdm
 
-# 從我們的模組中引入
 from data import DebertaDataset, BinaryTargetEncoder, SORTED_TARGET_COLS
 from model import QuestModel
 
@@ -35,7 +34,7 @@ class CFG:
     num_workers = 2       
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # 使用重排後的目標列表
+    # Use reordered target list
     target_cols = SORTED_TARGET_COLS
 
 def seed_everything(seed=42):
@@ -50,8 +49,8 @@ def seed_everything(seed=42):
 # --- Training Helper Functions ---
 def get_score(y_true, y_pred):
     """
-    y_true: (Batch, 30) - 原始分數
-    y_pred: (Batch, 30) - 已經還原回來的預測分數
+    y_true: (Batch, 30) - original scores
+    y_pred: (Batch, 30) - predictions restored to score space
     """
     scores = []
     for i in range(y_true.shape[1]):
@@ -68,13 +67,12 @@ def train_fn(train_loader, model, optimizer, scheduler, epoch, scaler):
     losses = []
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1} Train")
     
-    # 二元分類使用標準 BCEWithLogitsLoss
     criterion = nn.BCEWithLogitsLoss()
     
     for step, batch in enumerate(pbar):
         input_ids = batch['input_ids'].to(CFG.device)
         attention_mask = batch['attention_mask'].to(CFG.device)
-        labels = batch['labels'].to(CFG.device) # 這是長向量
+        labels = batch['labels'].to(CFG.device) # Flattened label vector
         
         token_type_ids = batch.get('token_type_ids')
         if token_type_ids is not None:
@@ -102,7 +100,7 @@ def train_fn(train_loader, model, optimizer, scheduler, epoch, scaler):
 
 def valid_fn(valid_loader, model, encoder):
     model.eval()
-    binary_preds = [] # 存 binary logits
+    binary_preds = [] 
     
     pbar = tqdm(valid_loader, desc="Valid")
     
@@ -118,12 +116,12 @@ def valid_fn(valid_loader, model, encoder):
             with autocast():
                 y_preds = model(input_ids, attention_mask, token_type_ids)
             
-            # 轉成機率
+            # Convert logits to probabilities
             binary_preds.append(y_preds.sigmoid().cpu().numpy())
             
     binary_preds = np.concatenate(binary_preds)
     
-    # 還原成 30 個分數
+    # Restore to 30 scores
     decoded_preds = encoder.inverse_transform(binary_preds)
     
     return decoded_preds
@@ -148,7 +146,7 @@ if __name__ == '__main__':
 
     # 1. Fit Binary Encoder
     print("Fitting Binary Target Encoder...")
-    # 注意：必須使用排序後的 columns 來 fit，這樣 slice 順序才正確
+    # Use sorted columns so slice order stays consistent
     target_encoder = BinaryTargetEncoder(target_cols=CFG.target_cols)
     target_encoder.fit(train)
     
@@ -170,10 +168,10 @@ if __name__ == '__main__':
         train_df = train.iloc[train_idx]
         valid_df = train.iloc[val_idx]
         
-        # 取得 True Labels (30維) 用於驗證
+        # Collect true 30-d labels for validation
         valid_true_labels = valid_df[CFG.target_cols].values
         
-        # Dataset 傳入 encoder
+        # Dataset uses encoder for binary targets
         train_dataset = DebertaDataset(train_df, tokenizer, target_encoder, max_len=CFG.max_len, is_train=True)
         valid_dataset = DebertaDataset(valid_df, tokenizer, target_encoder, max_len=CFG.max_len, is_train=True)
         
@@ -182,7 +180,7 @@ if __name__ == '__main__':
         valid_loader = DataLoader(valid_dataset, batch_size=CFG.batch_size, shuffle=False, 
                                   num_workers=CFG.num_workers, pin_memory=True)
         
-        # Model 傳入 encoder
+        # Model consumes the encoder slices
         model = QuestModel(
             CFG.model_name, 
             target_encoder=target_encoder,
@@ -209,7 +207,7 @@ if __name__ == '__main__':
         for epoch in range(CFG.epochs):
             avg_loss = train_fn(train_loader, model, optimizer, scheduler, epoch, scaler)
             
-            # 驗證時自動還原成 30 維分數
+            # Validation restores to 30-dim scores
             valid_preds = valid_fn(valid_loader, model, target_encoder)
             
             score = get_score(valid_true_labels, valid_preds)
