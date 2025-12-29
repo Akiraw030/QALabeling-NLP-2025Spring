@@ -347,6 +347,11 @@ No k fold, 10 epochs
 
 5 folds, 10 epochs
 
-|Model|0Fold best|1Fold best|2Fold best|3Fold best|4Fold best|Public(Eval)(raw)|Private(Eval)(raw)|Public(Eval)(voters)|Private(Eval)(voters)|
+|Model|0F best|1F best|2F best|3F best|4F best|
 |-|-|-|-|-|-|-|-|-|-|
-|deberta-v3-base|Epoch 5 - Loss: 0.3616 - Raw Score: 0.4028|Epoch 5 - Loss: 0.3648 - Raw Score: 0.3984|Epoch 5 - Loss: 0.3652 - Raw Score: 0.3945|Epoch 4 - Loss: 0.3737 - Raw Score: 0.3955|Epoch 6 - Loss: 0.3538 - Raw Score: 0.4019|0.38781|0.36733|0.41158|0.38255|
+|Deberta-v3-base|Epoch 5 - Loss: 0.3616 - Raw Score: 0.4028|Epoch 5 - Loss: 0.3648 - Raw Score: 0.3984|Epoch 5 - Loss: 0.3652 - Raw Score: 0.3945|Epoch 4 - Loss: 0.3737 - Raw Score: 0.3955|Epoch 6 - Loss: 0.3538 - Raw Score: 0.4019|
+|Qwen-3.0-0.6b|Epoch 3 - Loss: 0.3521 - Raw Score: 0.4011|Epoch 2 - Loss: 0.3820 - Raw Score: 0.4038|Epoch 3 - Loss: 0.3506 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3483 - Raw Score: 0.3875|Epoch 3 - Loss: 0.3518 - Raw Score: 0.4010
+|Llama-2.3-1b|Epoch 3 - Loss: 0.3756 - Raw Score: 0.3917|Epoch 3 - Loss: 0.3759 - Raw Score: 0.3871|Epoch 4 - Loss: 0.3466 - Raw Score: 0.3917|Epoch 3 - Loss: 0.3772 - Raw Score: 0.3744|Epoch 3 - Loss: 0.3754 - Raw Score: 0.3867|
+|ModernBERT-base|Epoch 3 - Loss: 0.3707 - Raw Score: 0.3818|Epoch 3 - Loss: 0.3712 - Raw Score: 0.3933|Epoch 3 - Loss: 0.3674 - Raw Score: 0.3856|Epoch 3 - Loss: 0.3675 - Raw Score: 0.3787|Epoch 3 - Loss: 0.3711 - Raw Score: 0.3825|
+|electra-base-discriminator|Epoch 4 - Loss: 0.3668 - Raw Score: 0.3939|Epoch 5 - Loss: 0.3584 - Raw Score: 0.3933|Epoch 5 - Loss: 0.3597 - Raw Score: 0.3958|Epoch 5 - Loss: 0.3586 - Raw Score: 0.3900|Epoch 4 - Loss: 0.3664 - Raw Score: 0.3881|
+|XLNet|Epoch 4 - Loss: 0.3568 - Raw Score: 0.3919|Epoch 3 - Loss: 0.3702 - Raw Score: 0.3907|Epoch 4 - Loss: 0.3569 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3705 - Raw Score: 0.3878|Epoch 3 - Loss: 0.3695 - Raw Score: 0.3957|

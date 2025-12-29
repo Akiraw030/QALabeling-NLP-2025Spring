@@ -24,17 +24,17 @@ POS_WEIGHT_VALUES = [
 class CFG:
     model_name = 'microsoft/deberta-v3-base'
     
-    pooling_strategy = 'cls_mean_pool' 
+    pooling_strategy = 'arch1_6groups' 
     
     # 【關鍵開關】
     # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
     # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
-    use_kfold = False
+    use_kfold = True
     
     max_len = 512
     batch_size = 4        
     accum_steps = 4       
-    epochs = 10        
+    epochs = 6        
     lr = 2e-5             
     head_lr = 1e-4        
     weight_decay = 0.01

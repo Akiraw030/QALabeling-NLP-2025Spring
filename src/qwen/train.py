@@ -30,7 +30,7 @@ class CFG:
     # 【關鍵開關】
     # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
     # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
-    use_kfold = False
+    use_kfold = True
     
     max_len = 512
     batch_size = 1        
@@ -272,9 +272,9 @@ if __name__ == '__main__':
                 best_score = score
                 
                 if CFG.use_kfold:
-                    save_name = f"deberta_v3_fold{fold}_best.pth"
+                    save_name = f"qwen_fold{fold}_best.pth"
                 else:
-                    save_name = f"deberta_v3_single_run_best.pth"
+                    save_name = f"qwen_single_run_best.pth"
                     
                 torch.save(model.state_dict(), f"./model/{save_name}")
                 print(f"--> Saved Best Model: {best_score:.4f} ({save_name})")

@@ -30,12 +30,12 @@ class CFG:
     # 【關鍵開關】
     # True  -> 執行完整的 5-Fold GroupKFold 訓練 (適合最終提交)
     # False -> 只執行一次 Train/Valid 切分 (適合快速 Ablation Study)
-    use_kfold = False
+    use_kfold = True
     
     max_len = 512
     batch_size = 2        # Reduced for RTX 4060
     accum_steps = 2       # Reduced accumulation steps
-    epochs = 10            # Fewer epochs for efficiency
+    epochs = 6            # Fewer epochs for efficiency
     lr = 1e-5             # Lower LR for stability
     head_lr = 5e-5        # Proportionally lower head LR
     weight_decay = 0.01

@@ -2,4 +2,7 @@
 data/
 model/
 deberta-v3-base-tokenizer/
+deberta-v3-base-full/
+electra-base-discriminator/
+xlnet-base-tokenizer/
 *.png
