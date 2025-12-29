@@ -1,9 +1,19 @@
+# Disable torch.compile to avoid C compiler requirement for ModernBERT
+os.environ['TORCH_COMPILE_DISABLE'] = '1'
+os.environ['TORCH_DYNAMO_DISABLE'] = '1'
+
 import os
 import gc
 import numpy as np
 import pandas as pd
 import torch
+import torch
+torch._dynamo.config.suppress_errors = True  # Disable torch.compile() error suppression
 import torch.nn as nn
+
+# Disable torch.compile() globally to avoid C compiler requirements
+if hasattr(torch, '_compile_threshold'):
+    torch._compile_threshold = float('inf')
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.amp import GradScaler
