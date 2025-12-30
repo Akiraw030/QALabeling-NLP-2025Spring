@@ -251,6 +251,10 @@ def build_loader(df: pd.DataFrame, spec: ModelSpec, cfg: Config) -> Tuple[DataLo
             trust_remote_code=spec.trust_remote_code,
         )
 
+    # Set padding token for models that don't have one (e.g., LLaMA, Qwen)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     dataset = QuestDataset(df, tokenizer, max_len=spec.max_len)
     loader = DataLoader(
         dataset, batch_size=spec.batch_size, shuffle=False,
