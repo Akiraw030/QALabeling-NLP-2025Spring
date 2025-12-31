@@ -1,0 +1,84 @@
+{
+  "final_score": 0.542353540512342,
+  "model_weights": {
+    "deberta_v3": 0.10367865860462189,
+    "modernbert": 0.20825952291488647,
+    "electra": 0.0007625012658536434,
+    "xlnet": 0.30105993151664734,
+    "llama": 0.34499308466911316,
+    "qwen": 0.04124630242586136
+  },
+  "fold_weights": {
+    "deberta_v3": {
+      "model": "deberta_v3",
+      "score": 0.5006752197008164,
+      "fold_weights": {
+        "deberta_v3_fold0_best": 0.35831761360168457,
+        "deberta_v3_fold1_best": 0.16946589946746826,
+        "deberta_v3_fold2_best": 0.20177285373210907,
+        "deberta_v3_fold3_best": 0.17725056409835815,
+        "deberta_v3_fold4_best": 0.09319308400154114
+      }
+    },
+    "modernbert": {
+      "model": "modernbert",
+      "score": 0.522118965459362,
+      "fold_weights": {
+        "modernbert_fold0_best": 0.17309121787548065,
+        "modernbert_fold1_best": 0.15546736121177673,
+        "modernbert_fold2_best": 0.0027446108870208263,
+        "modernbert_fold3_best": 0.3709326684474945,
+        "modernbert_fold4_best": 0.2977641522884369
+      }
+    },
+    "electra": {
+      "model": "electra",
+      "score": 0.5042289350499349,
+      "fold_weights": {
+        "electra_fold0_best": 0.30540433526039124,
+        "electra_fold1_best": 0.3316916823387146,
+        "electra_fold2_best": 0.006977140437811613,
+        "electra_fold3_best": 0.2261366993188858,
+        "electra_fold4_best": 0.12979014217853546
+      }
+    },
+    "xlnet": {
+      "model": "xlnet",
+      "score": 0.5181784947124022,
+      "fold_weights": {
+        "xlnet_fold0_best": 0.021167472004890442,
+        "xlnet_fold1_best": 0.37822845578193665,
+        "xlnet_fold2_best": 0.2172231525182724,
+        "xlnet_fold3_best": 0.136646568775177,
+        "xlnet_fold4_best": 0.2467343658208847
+      }
+    },
+    "llama": {
+      "model": "llama",
+      "score": 0.5267245516749497,
+      "fold_weights": {
+        "llama_fold0_best": 0.18943746387958527,
+        "llama_fold1_best": 0.08702818304300308,
+        "llama_fold2_best": 0.43969279527664185,
+        "llama_fold3_best": 0.101608507335186,
+        "llama_fold4_best": 0.1822330504655838
+      }
+    },
+    "qwen": {
+      "model": "qwen",
+      "score": 0.4853493373855554,
+      "fold_weights": {
+        "qwen_fold0_best": 0.10455561429262161,
+        "qwen_fold1_best": 0.2205394208431244,
+        "qwen_fold2_best": 0.2661082148551941,
+        "qwen_fold3_best": 0.24295568466186523,
+        "qwen_fold4_best": 0.16584105789661407
+      }
+    }
+  },
+  "config": {
+    "tpe_trials": 50,
+    "sample_frac": 1.0,
+    "weights_dir": "./model"
+  }
+}

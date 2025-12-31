@@ -122,18 +122,26 @@ Download pretrained weights from [HuggingFace](https://huggingface.co/Akiraw/NLP
 
 ### Step 4: Optimize Ensemble Weights
 
+#### **Option A: Optimize from Scratch**
+
 Optimize blend weights using hyperparameter optimization:
 
 ```bash
 python ./src/TPE.py
 ```
 
-Generates `tpe_weights.json` with optimal weights for each model fold.
+Generates multiple `<???>_weights_<???>.json` with optimal weights for each model and fold.
+The `hierarchical_weights.json` is the final output that contains full weights
+
+#### **Option B: Using Our Optimized Weights**
+
+The `hierarchical_weights.json` at the root directory is our weight
 
 ---
 
 ### Step 5: Prepare Kaggle Submission
 
+For some of the models that there are no official model in kaggle, you have to upload yourself
 Prepare models for Kaggle:
 
 ```bash
@@ -147,8 +155,8 @@ python ./src/xlnet/download.py
 
 ### Step 6: Kaggle Submission
 
-1. Upload `./src/kaggle_all.ipynb` to Kaggle
-2. Attach official model data and trained weights to notebook
+1. Upload `./src/kaggle_all.ipynb` to Kaggle, and delete some of the ModelSpec if you don't want them (deberta, modernbert, xlnet only in our result)
+2. Attach official model data and trained weights and TPE weight to notebook
 3. Configure internet, and gpu options in notebook configurations
 4. Configure paths in notebook code cell
 5. Press submit in the sidebar
@@ -162,6 +170,8 @@ python ./src/xlnet/download.py
 
 ### Best Performance Before Submission (DeBERTa Only)
 ![Best Performance DeBERTa](./doc/5.png)
+
+*Note: In the images below, the below one is without voter post-processing, the above one is with voter post-processing*
 
 ### Best and Final Performance After Submission
 ![Final Submission Performance](./doc/6.png)

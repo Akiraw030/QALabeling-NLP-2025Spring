@@ -9,6 +9,41 @@
 - ### B133030383 經濟二 陳彥丞
 - ### b12901109 電機三 陳政年
 
+<div style="page-break-after: always;"></div>
+
+# **Table of Contents**
+1. [Task Description](#task-description)
+    - [A. Task](#a-task)
+    - [B. Dataset](#b-dataset)
+2. [Data Exploration](#data-exploration)
+    - [A. Question Title, Body, and Answer Body Length](#a-question-title-body-and-answer-body-length)
+    - [B. QA Quality vs. User Frequency](#b-qa-quality-vs-user-frequency)
+    - [C. Target Variable Correlation Matrix](#c-target-variable-correlation-matrix)
+    - [D. Key Data Challenges](#d-key-data-challenges)
+    - [E. Counter-Intuitive Findings](#e-counter-intuitive-findings)
+3. [Related works](#related-works)
+    - [A. Rank 1st Solution](#a-rank-1st-solution)
+    - [B. Rank 3rd Solution](#b-rank-3rd-solution)
+    - [C. Other Notable Techniques](#c-other-notable-techniques)
+4. [Methods](#methods)
+    - [A. Methods we apply](#a-methods-we-apply)
+    - [B. Final model training log](#b-final-model-training-log)
+5. [Experiments](#experiments)
+    - [A. Grouping of projector heads](#a-grouping-of-projector-heads)
+    - [B. Class weight for binary cross-entropy loss](#b-class-weight-for-binary-cross-entropy-loss)
+    - [C. The use of larger learning rates for projector heads](#c-the-use-of-larger-learning-rates-for-projector-heads)
+    - [D. The use of group k fold](#d-the-use-of-group-k-fold)
+    - [E. The strategy of head output](#e-the-strategy-of-head-output)
+    - [F. Post-processing strategies](#f-post-processing-strategies)
+    - [G. Backbone feature extraction and projector head structure](#g-backbone-feature-extraction-and-projector-head-structure)
+    - [H. Backbone model selection](#h-backbone-model-selection)
+6. [Conclusion](#conclusion)
+    - [Key Learnings and Insights](#key-learnings-and-insights)
+7. [Reference](#reference)
+8. [Performance](#performance)
+
+<div style="page-break-after: always;"></div>
+
 # **Task Description**
 
 ## **A. Task**
@@ -178,7 +213,7 @@ We are challenged to use the given dataset to build a predictive model for diffe
 For our final model, we adapt the below strategy:
 - For the model backbone, we use 6 models to ensemble in total, including DeBERTa-v3-base, Qwen-3.0-0.6b, Llama-3.2-1b, ModernBERT-base, ELECTRA-base-discriminator, and XLNet
 - For backbone feature extraction, we utilize the last hidden layer outputs from the backbone models as input for projector heads, including the CLS token, global mean pooling of all tokens, and question/answer-specific mean pooling when available (models supporting token type IDs use separate Q/A pooling; others use global pooling only)
-- For the projector heads, we utilize 6 heads, each responsible for generating some of the 30 output features, with QA-tangled grouping strategy
+- For the projector heads, we utilize 6 heads, each responsible for generating some of the 30 output features, with QA-distangled grouping strategy
 - For the projector head output strategy, we use ordinary single regression for each output feature
 - For post-processing, we use the voters strategy as our main approach
 - For blending, we use averging of different model output (would be better using TPE, but we didn't have time to try that)
@@ -200,7 +235,18 @@ Below table lists the models we apply for final ensemble with their training los
 |electra-base-discriminator|Epoch 6 - Loss: 0.3509 - Raw Score: 0.3926|Epoch 6 - Loss: 0.3517 - Raw Score: 0.3822|Epoch 4 - Loss: 0.3657 - Raw Score: 0.4010|Epoch 5 - Loss: 0.3589 - Raw Score: 0.3808|Epoch 5 - Loss: 0.3569 - Raw Score: 0.4025|
 |XLNet|Epoch 3 - Loss: 0.3697 - Raw Score: 0.3971|Epoch 4 - Loss: 0.3592 - Raw Score: 0.3934|Epoch 3 - Loss: 0.3700 - Raw Score: 0.3976|Epoch 3 - Loss: 0.3715 - Raw Score: 0.3845|Epoch 3 - Loss: 0.3683 - Raw Score: 0.4032|
 
-For the detail explanation and experiment about why we utilize above methods, see below experiments section.
+Moreover, we blend them with below TPE weight:
+We first blend across folds in single model with the first 5 weights, then further blend across models with the last weight in the below table.
+|Model|0F|1F|2F|3F|4F|Across models|
+|-|-|-|-|-|-|-|
+|Deberta-v3-base|0.3583|0.1695|0.2018|0.1773|0.0932|0.1037|
+|Qwen-3.0-0.6b|0.1046|0.2205|0.2661|0.2430|0.1658|0.0412|
+|Llama-3.2-1b|0.1894|0.0870|0.4397|0.1016|0.1822|0.3450|
+|ModernBERT-base|0.1731|0.1555|0.0027|0.3709|0.2977|0.2083|
+|electra-base-discriminator|0.3054|0.3317|0.0070|0.2261|0.1298|0.0008|
+|XLNet|0.0212|0.3782|0.2172|0.1366|0.2467|0.3011|
+
+For the detail explanation and experiment about why we utilize above methods, see experiments section in the following pages.
 
 <div style="page-break-after: always;"></div>
 
@@ -707,4 +753,15 @@ With 30 distinct targets exhibiting low cross-correlations and weak question-ans
 
 
 # **Performance**
-![Result](./5.png)
+### Final Performance Before Submission (Multiple Models Average without TPE)
+![Final Performance Multiple Models](./4.png)
+
+### Best Performance Before Submission (DeBERTa Only)
+![Best Performance DeBERTa](./5.png)
+
+### Best and Final Performance After Submission
+*Note: In the images below, the below one is without voter post-processing, the above one is with voter post-processing*
+
+*Note: For the below result, we only use deberta, modernbert, xlnet due to time limit of the competition. The weight is from result in the methods section but delete the other models and normalized the sum of weights to 1*
+
+![Final Submission Performance](./6.png)
